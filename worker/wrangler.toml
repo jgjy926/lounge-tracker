@@ -1,0 +1,23 @@
+name = "lounge-tracker"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# --- Public, non-secret config ---
+[vars]
+# Origins allowed to call this Worker. Any localhost port is also accepted, which
+# covers `npm run dev` and the Android app (its WebView origin is https://localhost).
+ALLOWED_ORIGIN = "https://jgjy926.github.io"
+# Koofr WebDAV base URL.
+KOOFR_DAV_BASE = "https://app.koofr.net/dav/Koofr"
+# Everything this app stores lives under this Koofr folder.
+DATA_DIR = "LoungeTracker"
+# Workers AI model for the Ask feature (same model as the campaign dashboard).
+AI_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct"
+
+# Workers AI binding (free tier). Powers /api/ask.
+[ai]
+binding = "AI"
+
+# --- Secrets (set via `wrangler secret put`) ---
+#   wrangler secret put APP_API_KEY        # the access token you enter in the app's Settings
+#   wrangler secret put KOOFR_AUTH_HEADER  # "Basic " + base64("koofr-email:app-password")

@@ -1,0 +1,8 @@
+{
+  "appId": "io.github.jgjy926.loungetracker",
+  "appName": "Lounge Tracker",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  }
+}

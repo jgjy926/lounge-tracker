@@ -1,0 +1,54 @@
+{
+  "schema": "lounge-rules-import/v1",
+  "source_document": "AEON Credit - Terms and Conditions for Plaza Premium Lounge Access in Malaysia and at International Airports, Version: August 2026",
+  "rules": [
+    {
+      "title": "Plaza Premium complimentary access",
+      "card": { "bank": "AEON", "name": "AEON Member Plus Gold" },
+      "network": "Plaza Premium",
+      "countries": null,
+      "flight_scope": "international",
+      "quota": { "principal": 3, "supplementary": 0, "unlimited": false, "period": "calendar_year", "per_day_limit": 1 },
+      "condition": {
+        "type": "min_spend",
+        "amount": 500,
+        "count": null,
+        "overseas_only": false,
+        "window": "before_or_after",
+        "days_before": 30,
+        "days_after": 30,
+        "sides_combine": true,
+        "cumulative": true,
+        "boundary_inclusive": true,
+        "visit_day_counts": null,
+        "same_spend_reusable": true,
+        "spend_holder": "principal_only",
+        "excluded_spend_types": ["instalment", "balance_transfer", "cash_advance", "fee"],
+        "excluded_spend_text": "Instalment Payment Plan (IPP), Flexi Payment Plan (FPP), Balance Transfer, Ready Cash, Auto Balance Conversion (ABC), Cash Advance and Quasi Cash, Interest charges and/or finance charges, Other credit card related fees and charges."
+      },
+      "guest": {
+        "allowed": null,
+        "consumes_quota": null,
+        "note": "First accompanying infant aged 2 and below is free. Guests aged 3 and above get 25% off the listed price, paid before access."
+      },
+      "penalty": {
+        "amount": 134,
+        "note": "RM134.00 (excluding taxes) for each access, billed within 3 months from the visit date, if the spending condition is not met and the lounge is used for a domestic Malaysia flight departure."
+      },
+      "entry_requirements": "Physical AEON Credit Card and Boarding Pass. The name on both must match. Confirm whether Principal or Supplementary.",
+      "duration_hours": 3,
+      "notes": "Spend must be on the physical card used to enter. Former name: AEON Gold Visa / Mastercard.",
+      "effective_from": "August 2026",
+      "effective_to": null,
+      "confidence": "medium",
+      "_source": {
+        "quota": "The entitlement access to the Plaza Premium Lounges is valid for one (1) calendar year, from January to December.",
+        "per_day_limit": "Cardholders are entitled to access any Plaza Premium Lounges ONE (1) time per day.",
+        "condition": "Minimum spend of RM500 in single or cumulative transactions within 30 days before and/or 30 days after the lounge visit date",
+        "flight_scope": "The complimentary access is only applicable to international flight departures via the physical AEON Credit Cards with minimum spending conditions",
+        "effective_from": "Version: August 2026"
+      }
+    }
+  ],
+  "lounges": []
+}

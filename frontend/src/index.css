@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-100 text-slate-800 antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[15px] text-slate-800 outline-none focus:border-night-700 focus:ring-2 focus:ring-night-700/20;
+  }
+  .btn {
+    @apply inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-night-900 text-white hover:bg-night-800;
+  }
+  .btn-accent {
+    @apply btn bg-brass-500 text-night-950 hover:bg-brass-400;
+  }
+  .btn-ghost {
+    @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+  }
+  .btn-danger {
+    @apply btn border border-red-200 bg-white text-red-700 hover:bg-red-50;
+  }
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white;
+  }
+  .pad-safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .pad-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

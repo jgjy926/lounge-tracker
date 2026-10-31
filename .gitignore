@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build output
+dist/
+**/dist/
+
+# secrets / local env (never commit)
+.env
+.env.local
+**/.env
+**/.env.local
+.dev.vars
+**/.dev.vars
+
+# wrangler
+.wrangler/
+**/.wrangler/
+
+# misc
+.DS_Store
+*.log
+
+# android builds
+*.apk
+*.aab
