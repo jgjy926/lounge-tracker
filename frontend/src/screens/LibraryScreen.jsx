@@ -4,7 +4,7 @@ import { AreaField, Empty, Icon, PageTitle, Segmented, SelectField, Sheet, TextF
 import { CardForm, LoungeForm } from '../components/forms'
 import RuleForm from '../components/RuleForm'
 import { useStore } from '../store/useStore'
-import { STALE_AFTER_DAYS, money } from '../lib/engine'
+import { STALE_AFTER_DAYS, liveRules, loungesForCard, loungesForRule, money } from '../lib/engine'
 import { QUOTA_PERIODS, SPEND_TYPE_LABEL, WINDOWS, cardLabel, loungeLabel, uid } from '../lib/schema'
 import { diffDays, formatDate, formatRange, todayIso } from '../lib/dates'
 import { cloudEnabled, fetchFile, uploadFile } from '../lib/api'
@@ -16,31 +16,97 @@ const NOT_STATED = 'Not stated'
 const yn = (v) => (v === true ? 'Yes' : v === false ? 'No' : NOT_STATED)
 const label = (pairs, v) => pairs.find(([k]) => k === v)?.[1] || NOT_STATED
 
-// ---------- cards ----------
+// ---------- banks and cards ----------
+
+function CardDetail({ card, onEdit, onClose, onOpenDoc }) {
+  const doc = useStore((s) => s.doc)
+  const today = todayIso()
+  const rules = liveRules(doc, card.card_id, today)
+  const docs = doc.documents.filter((d) => (d.card_ids || []).includes(card.card_id))
+  const sources = [...new Set(rules.map((r) => r.source_document).filter(Boolean))]
+  return (
+    <Sheet
+      title={cardLabel(card)}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn-ghost" onClick={onEdit}><Icon name="edit" size={16} /> Edit card</button>
+          <button className="btn-primary" onClick={() => go(`import/lounges/${card.card_id}`)}><Icon name="import" size={16} /> Import lounge list</button>
+        </>
+      }
+    >
+      <section aria-label="T&Cs">
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">T&C</h3>
+        {!docs.length && !sources.length && <p className="text-sm text-slate-600">None imported yet.</p>}
+        <ul className="space-y-1 text-sm">
+          {docs.map((d) => (
+            <li key={d.doc_id}><button className="text-left font-medium text-night-700 underline" onClick={() => onOpenDoc(d)}>{d.title}</button></li>
+          ))}
+          {sources.filter((s) => !docs.some((d) => d.title === s)).map((s) => <li key={s} className="text-slate-800">{s}</li>)}
+        </ul>
+      </section>
+      {!rules.length && <p className="text-sm text-slate-600">This card has no lounge rule yet. Import its T&C first.</p>}
+      {rules.map((r) => {
+        const lounges = loungesForRule(doc, r, today).sort((a, b) => `${a.airport_code}${a.name}`.localeCompare(`${b.airport_code}${b.name}`))
+        return (
+          <section key={r.rule_id} aria-label={r.title || r.network}>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Eligible lounges: {r.title || r.network}</h3>
+            <p className="mb-1 text-xs text-slate-500">{r.lounge_scope === 'specific' ? 'The T&C limits access to these lounges.' : `Any ${r.network || 'programme'} lounge counts. These are the ones saved.`}</p>
+            {!lounges.length && <p className="text-sm text-amber-800">None saved. Import the bank’s lounge list, or add them in Lounges.</p>}
+            <ul className="divide-y divide-slate-100">
+              {lounges.map((l) => (
+                <li key={l.lounge_id} className="py-1.5 text-sm text-slate-800">
+                  {loungeLabel(l)}
+                  {l.country ? <span className="text-xs text-slate-500"> · {l.country}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
+      })}
+    </Sheet>
+  )
+}
 
 function CardsTab() {
   const doc = useStore((s) => s.doc)
   const [editing, setEditing] = useState(null)
+  const [viewing, setViewing] = useState(null)
+  const [openDoc, setOpenDoc] = useState(null)
+  const today = todayIso()
+  const banks = uniq(doc.cards.map((c) => c.bank))
+  const viewed = doc.cards.find((c) => c.card_id === viewing)
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex justify-end gap-2">
+        <button className="btn-accent" onClick={() => go('import')}><Icon name="import" size={16} /> Import T&C</button>
         <button className="btn-ghost" onClick={() => setEditing({})}><Icon name="plus" size={16} /> Add card</button>
       </div>
-      {!doc.cards.length && <Empty title="No cards yet">Importing a T&C creates the card for you, or add one here.</Empty>}
-      <ul className="grid gap-2 sm:grid-cols-2">
-        {doc.cards.map((c) => (
-          <li key={c.card_id}>
-            <button className="card block w-full p-3 text-left" onClick={() => setEditing(c)}>
-              <p className="font-semibold text-night-900">{cardLabel(c)}</p>
-              <p className="text-xs text-slate-500">
-                {doc.rules.filter((r) => r.card_id === c.card_id && !r.effective_to).length} live rules
-                {c.status === 'closed' ? ' · Closed' : ''}
-              </p>
-            </button>
-          </li>
-        ))}
-      </ul>
+      {!doc.cards.length && <Empty title="No cards yet">Importing a bank’s T&C creates the card, its rules and its lounge list for you.</Empty>}
+      {banks.map((bank) => (
+        <section key={bank} aria-label={bank} className="space-y-2">
+          <h2 className="px-1 text-sm font-semibold text-night-900">{bank}</h2>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {doc.cards.filter((c) => c.bank === bank).map((c) => {
+              const rules = liveRules(doc, c.card_id, today)
+              const count = loungesForCard(doc, c.card_id, today).length
+              const tnc = doc.documents.find((d) => (d.card_ids || []).includes(c.card_id))?.title || rules.find((r) => r.source_document)?.source_document
+              return (
+                <li key={c.card_id}>
+                  <button className="card block w-full p-3 text-left" onClick={() => setViewing(c.card_id)}>
+                    <p className="font-semibold text-night-900">{c.name}{c.last4 ? ` ··${c.last4}` : ''}</p>
+                    <p className="text-xs text-slate-600">{count} eligible lounge{count === 1 ? '' : 's'}{c.status === 'closed' ? ' · Closed' : ''}</p>
+                    <p className="truncate text-xs text-slate-500">{tnc || 'No T&C imported yet'}</p>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      ))}
+      {viewed && <CardDetail card={viewed} onClose={() => setViewing(null)} onEdit={() => { setEditing(viewed); setViewing(null) }} onOpenDoc={(d) => { setOpenDoc(d); setViewing(null) }} />}
       {editing && <CardForm initial={editing} onClose={() => setEditing(null)} />}
+      {openDoc && <DocumentForm initial={openDoc} onClose={() => setOpenDoc(null)} />}
     </div>
   )
 }
@@ -52,9 +118,13 @@ function LoungesTab() {
   const [editing, setEditing] = useState(null)
   const [country, setCountry] = useState('')
   const [network, setNetwork] = useState('')
+  const [cardId, setCardId] = useState('')
+  const today = todayIso()
   const countries = uniq(doc.lounges.map((l) => l.country))
   const networks = uniq(doc.lounges.flatMap((l) => l.networks || []))
-  const rows = doc.lounges
+  const onCard = cardId ? loungesForCard(doc, cardId, today) : doc.lounges
+  const cardsFor = (l) => doc.cards.filter((c) => c.status !== 'closed' && loungesForCard(doc, c.card_id, today).some((x) => x.lounge_id === l.lounge_id))
+  const rows = onCard
     .filter((l) => (!country || l.country === country) && (!network || (l.networks || []).includes(network)))
     .sort((a, b) => `${a.airport_code}${a.name}`.localeCompare(`${b.airport_code}${b.name}`))
   return (
@@ -65,17 +135,19 @@ function LoungesTab() {
       </div>
       {doc.lounges.length > 0 && (
         <div className="grid grid-cols-2 gap-3">
+          <SelectField className="col-span-2" label="Card" value={cardId} onChange={(v) => setCardId(v || '')} options={doc.cards.map((c) => [c.card_id, cardLabel(c)])} placeholder="All cards" />
           <SelectField label="Country" value={country} onChange={(v) => setCountry(v || '')} options={countries.map((x) => [x, x])} placeholder="All countries" />
           <SelectField label="Programme" value={network} onChange={(v) => setNetwork(v || '')} options={networks.map((x) => [x, x])} placeholder="All programmes" />
         </div>
       )}
-      {!doc.lounges.length && <Empty title="No lounges yet" action={<button className="btn-accent" onClick={() => go('import/lounges')}><Icon name="import" size={16} /> Add with AI</button>}>Add the lounges you actually use. There’s no need for a full directory.</Empty>}
+      {!doc.lounges.length && <Empty title="No lounges yet" action={<button className="btn-accent" onClick={() => go('import/lounges')}><Icon name="import" size={16} /> Import a bank’s list</button>}>Lounges come from each bank’s T&C. Importing the T&C adds the ones it names.</Empty>}
       <ul className="grid gap-2 sm:grid-cols-2">
         {rows.map((l) => (
           <li key={l.lounge_id}>
             <button className="card block w-full p-3 text-left" onClick={() => setEditing(l)}>
               <p className="font-semibold text-night-900">{loungeLabel(l)}</p>
               <p className="text-xs text-slate-500">{[(l.networks || []).join(', '), l.airport_name, l.country, l.verified === false ? 'Unverified' : ''].filter(Boolean).join(' · ')}</p>
+              <p className="text-xs text-slate-600">{cardsFor(l).map((c) => `${c.bank} ${c.name}`).join(', ') || 'No card lists this lounge'}</p>
             </button>
           </li>
         ))}
@@ -140,6 +212,7 @@ function RuleDetail({ rule, onEdit, onClose }) {
         )}
         <Row k="Flights" v={rule.flight_scope || NOT_STATED} />
         <Row k="Countries" v={(rule.countries || []).join(', ') || NOT_STATED} />
+        <Row k="Lounges" v={rule.lounge_scope === 'specific' ? `Only the ${(rule.lounge_ids || []).length} listed` : `Any in ${rule.network || 'the programme'}`} />
         <Row k="Guests use visits" v={yn(rule.guest.consumes_quota)} />
         {rule.penalty.amount != null && <Row k="Fee if not met" v={money(rule.penalty.amount)} />}
         {rule.duration_hours != null && <Row k="Stay limit" v={`${rule.duration_hours} hours`} />}
@@ -378,7 +451,7 @@ function DocumentsTab() {
 }
 
 export default function LibraryScreen() {
-  const [tab, setTab] = useState('rules')
+  const [tab, setTab] = useState('cards')
   return (
     <div className="space-y-4">
       <PageTitle title="Library" />
@@ -386,7 +459,7 @@ export default function LibraryScreen() {
         label="Library sections"
         value={tab}
         onChange={setTab}
-        options={[['rules', 'Rules'], ['cards', 'Cards'], ['lounges', 'Lounges'], ['docs', 'T&Cs']]}
+        options={[['cards', 'Banks'], ['rules', 'Rules'], ['lounges', 'Lounges'], ['docs', 'T&Cs']]}
       />
       {tab === 'rules' && <RulesTab />}
       {tab === 'cards' && <CardsTab />}

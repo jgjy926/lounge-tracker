@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest'
-import { STATUS, searchLounges, spendNote } from './engine'
-import { applyLoungesImport, applyTripsImport, parsePaste, programmeChoices } from './importer'
+import { STATUS, coverage, loungesForCard, searchLounges, spendNote } from './engine'
+import { applyLoungesImport, applyRulesImport, applyTripsImport, missingFromImport, parsePaste } from './importer'
 import { allAttention, buildIcs, buildReminders, planTrips } from './trips'
-import { buildLoungesPrompt, buildTripPrompt } from './prompts'
+import { buildLoungesPrompt, buildRulesPrompt, buildTripPrompt } from './prompts'
 import { defaultDocument, emptyLounge, emptyTrip, normalizeDoc, normalizeRule, ruleGroup, sameProgramme } from './schema'
 
 const today = '2026-11-01'
@@ -223,48 +223,138 @@ describe('spend that will not count', () => {
   })
 })
 
-describe('importing lounges', () => {
-  const paste = (lounges) => JSON.stringify({ schema: 'lounge-directory-import/v1', lounges })
-  const raw = { name: 'Golden Lounge', networks: ['Priority Pass'], airport_code: 'kul', country: 'Malaysia', source_url: 'https://example.com/x', confidence: 'high' }
+describe('lounges from a bank T&C', () => {
+  const paste = (lounges, over = {}) => JSON.stringify({ schema: 'lounge-directory-import/v1', card: { bank: 'AEON', name: 'Gold c1' }, lounge_coverage: 'listed_only', lounges, ...over })
+  const raw = { name: 'Golden Lounge', airport_code: 'kul', country: 'Malaysia', terminal: 'T1', _source: 'Golden Lounge, KLIA T1' }
+  const read = (doc, text) => parsePaste(text, { doc, today })
 
-  test('arrives unverified, with the airport code tidied', () => {
-    const p = parsePaste(paste([raw]), { doc: docWith(), today })
-    expect(p.kind).toBe('lounges')
-    expect(p.lounges[0].lounge).toMatchObject({ airport_code: 'KUL', verified: false, source_url: 'https://example.com/x' })
-    expect(p.lounges[0].issues).toEqual([])
-    expect(applyLoungesImport(docWith(), p).added).toBe(1)
+  test('the prompt reads the document and never the web', () => {
+    const text = buildLoungesPrompt({ bank: 'AEON', name: 'Gold' }, 'THE T&C TEXT')
+    expect(text).toContain('Use this document only')
+    expect(text).toContain('Don’t search the web'.replace('’', "'"))
+    expect(text).toContain('AEON Gold')
+    expect(text).toContain('THE T&C TEXT')
+    expect(buildRulesPrompt()).toContain('come from this document only')
+    expect(text).not.toMatch(/source_url/)
   })
 
-  test('gaps are flagged, and a non-web link is dropped', () => {
-    const p = parsePaste(paste([{ name: 'X', source_url: 'javascript:alert(1)' }]), { doc: docWith(), today })
-    expect(p.lounges[0].lounge.source_url).toBe('')
-    expect(p.lounges[0].issues.map((i) => i.field)).toEqual(['source_url', 'networks', 'airport_code'])
+  test('finds the card and its rule, and attaches the lounges to that rule', () => {
+    const doc = docWith({ lounges: [] })
+    const p = read(doc, paste([raw]))
+    expect(p).toMatchObject({ kind: 'lounges', card_id: 'c1', rule_id: 'r_c1', scope: 'specific' })
+    const { doc: next, added, linked } = applyLoungesImport(doc, p)
+    expect([added, linked]).toEqual([1, 1])
+    const lounge = next.lounges[0]
+    expect(next.rules[0].lounge_ids).toEqual([lounge.lounge_id])
+    expect(next.rules[0].lounge_scope).toBe('specific')
+    expect(lounge.networks).toEqual(['Plaza Premium'])
+    expect(lounge.verified).toBe(true)
   })
 
-  test('already saved lounges start unticked', () => {
-    const p = parsePaste(paste([{ name: 'Plaza Premium Lounge', airport_code: 'KUL', networks: ['Plaza Premium'], terminal: '' }]), { doc: docWith(), today })
-    expect(p.lounges[0]).toMatchObject({ duplicate: true, include: false })
+  test('each card has its own list, and one lounge can be on several', () => {
+    const doc = docWith({ cards: [card('c1'), card('c2', 'AmBank')], rules: [rule('c1'), rule('c2')], lounges: [] })
+    const first = applyLoungesImport(doc, read(doc, paste([raw]))).doc
+    const p = read(first, paste([raw, { ...raw, name: 'Sama-Sama', _source: 'Sama-Sama' }], { card: { bank: 'AmBank', name: 'Gold c2' } }))
+    expect(p.lounges[0].existing_id).toBe(first.lounges[0].lounge_id)
+    const second = applyLoungesImport(first, p).doc
+    expect(second.lounges).toHaveLength(2)
+    expect(loungesForCard(second, 'c1', today).map((l) => l.name)).toEqual(['Golden Lounge'])
+    expect(loungesForCard(second, 'c2', today).map((l) => l.name)).toEqual(['Golden Lounge', 'Sama-Sama'])
   })
 
-  test('an empty answer explains itself', () => {
-    expect(parsePaste(paste([]), { doc: docWith(), today }).kind).toBe('error')
+  test('a listed-only card does not cover other lounges in the same programme', () => {
+    const doc = docWith({ lounges: [lounge()] })
+    const next = applyLoungesImport(doc, read(doc, paste([raw]))).doc
+    const r = next.rules[0]
+    expect(coverage(r, next.lounges.find((l) => l.name === 'Golden Lounge'), today)).toBeNull()
+    expect(coverage(r, lounge(), today)).toMatch(/isn’t on this card’s lounge list/)
   })
 
-  test('a near-match programme is offered as the rule’s programme', () => {
-    const rules = [rule('c1', { network: 'Plaza Premium Lounge Malaysia' })]
-    const [choice] = programmeChoices([{ networks: ['Plaza Premium'] }], rules)
-    expect(choice.mapTo).toBe('Plaza Premium Lounge Malaysia')
-    const p = { lounges: [{ include: true, lounge: lounge({ networks: ['Plaza Premium'] }) }], programmes: [choice] }
-    expect(applyLoungesImport(docWith(), p).doc.lounges.at(-1).networks).toEqual(['Plaza Premium Lounge Malaysia'])
+  test('one bank’s list doesn’t put a lounge in reach of another bank’s programme', () => {
+    const doc = docWith({ cards: [card('c1'), card('c2', 'AmBank')], rules: [rule('c1'), rule('c2', { network: 'Priority Pass', title: 'PP' })], lounges: [lounge()] })
+    const shared = { name: 'Plaza Premium Lounge', airport_code: 'KUL', _source: 'x' }
+    const listed = applyLoungesImport(doc, read(doc, paste([shared], { card: { bank: 'AmBank', name: 'Gold c2' } }))).doc
+    expect(listed.lounges[0].networks).toEqual(['Plaza Premium'])
+    expect(loungesForCard(listed, 'c2', today)).toHaveLength(1)
+    const wide = applyLoungesImport(doc, read(doc, paste([shared], { card: { bank: 'AmBank', name: 'Gold c2' }, lounge_coverage: 'whole_programme' }))).doc
+    expect(wide.lounges[0].networks).toEqual(['Plaza Premium', 'Priority Pass'])
   })
 
-  test('a programme that already matches needs no choice', () => {
-    expect(programmeChoices([{ networks: ['Plaza Premium Lounge'] }], [rule('c1')])).toEqual([])
+  test('a whole-programme T&C still covers other lounges in the programme', () => {
+    const doc = docWith({ lounges: [lounge()] })
+    const next = applyLoungesImport(doc, read(doc, paste([raw], { lounge_coverage: 'whole_programme' }))).doc
+    expect(next.rules[0].lounge_scope).toBe('network')
+    expect(loungesForCard(next, 'c1', today)).toHaveLength(2)
   })
 
-  test('a rule with no matching lounge gets a warning', () => {
-    const p = parsePaste(JSON.stringify({ rules: [{ card: { bank: 'AEON', name: 'Gold c1' }, network: 'DragonPass', quota: {} }] }), { doc: docWith(), today })
-    expect(p.drafts[0].issues.some((i) => /No saved lounge lists DragonPass/.test(i.message))).toBe(true)
+  test('a lounge the document drops can be removed from the list', () => {
+    const doc = docWith({ lounges: [] })
+    const first = applyLoungesImport(doc, read(doc, paste([raw, { ...raw, name: 'Old Lounge' }]))).doc
+    const p = read(first, paste([raw]))
+    expect(missingFromImport(first, p).map((l) => l.name)).toEqual(['Old Lounge'])
+    expect(applyLoungesImport(first, p).doc.rules[0].lounge_ids).toHaveLength(2)
+    expect(applyLoungesImport(first, { ...p, remove_missing: true }).doc.rules[0].lounge_ids).toHaveLength(1)
+  })
+
+  test('gaps are flagged, repeats collapse, and an empty list explains itself', () => {
+    const doc = docWith({ lounges: [] })
+    const p = read(doc, paste([{ name: 'X' }, { name: 'X' }]))
+    expect(p.lounges).toHaveLength(1)
+    expect(p.lounges[0].issues.map((i) => i.field)).toEqual(['airport_code', '_source'])
+    expect(read(doc, paste([])).kind).toBe('error')
+    expect(read(doc, paste([])).error).toMatch(/names no lounges/)
+  })
+
+  test('a card with no rule has nothing to attach to', () => {
+    const doc = docWith({ rules: [], lounges: [] })
+    const p = read(doc, paste([raw]))
+    expect(p.rule_id).toBe('')
+    expect(applyLoungesImport(doc, p).doc).toBe(doc)
+  })
+
+  describe('inside the T&C import', () => {
+    const tnc = (over = {}) => JSON.stringify({ rules: [{ card: { bank: 'AEON', name: 'Gold c1' }, network: 'Plaza Premium', quota: {}, lounge_coverage: 'listed_only', lounges: [raw], ...over }] })
+    const opts = { today, newCard: (c) => ({ ...card('new'), ...c }) }
+
+    test('lounges named for a card go on that card’s rule', () => {
+      const doc = docWith({ rules: [], lounges: [] })
+      const { doc: next, loungesAdded } = applyRulesImport(doc, parsePaste(tnc(), { doc, today }), opts)
+      expect(loungesAdded).toBe(1)
+      expect(next.rules[0]).toMatchObject({ lounge_scope: 'specific', lounge_ids: [next.lounges[0].lounge_id] })
+      expect(loungesForCard(next, 'c1', today)).toHaveLength(1)
+    })
+
+    test('an already saved lounge is linked, not repeated', () => {
+      const doc = docWith({ rules: [], lounges: [lounge({ name: 'Golden Lounge', terminal: 'T1' })] })
+      const { doc: next } = applyRulesImport(doc, parsePaste(tnc(), { doc, today }), opts)
+      expect(next.lounges).toHaveLength(1)
+      expect(next.rules[0].lounge_ids).toEqual(['kul1'])
+    })
+
+    test('a new T&C naming no lounges keeps the card’s list', () => {
+      const doc = docWith({ rules: [], lounges: [] })
+      const first = applyRulesImport(doc, parsePaste(tnc(), { doc, today }), opts).doc
+      const again = parsePaste(tnc({ lounges: [], lounge_coverage: null, effective_from: '2027-01-01' }), { doc: first, today })
+      const next = applyRulesImport(first, again, opts).doc
+      const live = next.rules.find((r) => !r.effective_to)
+      expect(live.lounge_scope).toBe('specific')
+      expect(live.lounge_ids).toEqual(first.rules[0].lounge_ids)
+    })
+
+    test('a saved T&C is tied to the card it was imported for', () => {
+      const doc = docWith({ rules: [], lounges: [], documents: [{ doc_id: 'd1', title: 'AEON T&C', card_ids: [], text: 'x' }] })
+      const { doc: next } = applyRulesImport(doc, parsePaste(tnc(), { doc, today }), { ...opts, documentId: 'd1' })
+      expect(next.documents[0].card_ids).toEqual(['c1'])
+      expect(next.rules[0].document_id).toBe('d1')
+    })
+
+    test('a T&C naming no lounges says what to do next', () => {
+      const doc = docWith({ rules: [], lounges: [] })
+      const p = parsePaste(tnc({ lounges: [], lounge_coverage: 'whole_programme' }), { doc, today })
+      expect(p.drafts[0].issues.some((i) => /names no lounges/.test(i.message))).toBe(true)
+      const limited = parsePaste(tnc({ lounges: [] }), { doc, today })
+      expect(limited.drafts[0].issues.some((i) => /none are listed/.test(i.message))).toBe(true)
+    })
   })
 })
 
@@ -295,12 +385,6 @@ describe('importing trips', () => {
 })
 
 describe('prompts', () => {
-  test('the lounge prompt carries the target and my programmes', () => {
-    const text = buildLoungesPrompt('KUL', ['Plaza Premium'])
-    expect(text).toContain('Find the lounges for: KUL')
-    expect(text).toContain('Plaza Premium')
-    expect(text).toContain('lounge-directory-import/v1')
-  })
   test('the trip prompt asks for no personal details', () => {
     expect(buildTripPrompt()).toMatch(/Leave out names, booking references/)
   })

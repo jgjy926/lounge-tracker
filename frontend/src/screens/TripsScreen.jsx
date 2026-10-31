@@ -33,7 +33,6 @@ function SpendSteps({ plan }) {
 function TripCard({ item, today, onEdit }) {
   const { trip, best, plan, lounges, options } = item
   const days = diffDays(trip.date, today)
-  const importTarget = `import/lounges/${encodeURIComponent(trip.airport_code)}`
   return (
     <article className="card space-y-3 p-3.5">
       <div className="flex items-start justify-between gap-2">
@@ -50,7 +49,7 @@ function TripCard({ item, today, onEdit }) {
       {!lounges.length ? (
         <div className="space-y-2 rounded-lg bg-slate-100 p-3 text-sm text-slate-700">
           <p>No lounges saved at {trip.airport_code}, so the app can’t tell which card gets you in.</p>
-          <button className="btn-ghost" onClick={() => go(importTarget)}><Icon name="import" size={16} /> Find them with AI</button>
+          <button className="btn-ghost" onClick={() => go('import/lounges')}><Icon name="import" size={16} /> Import a bank’s lounge list</button>
         </div>
       ) : !best ? (
         <p className="rounded-lg bg-slate-100 p-3 text-sm text-slate-700">None of your cards cover {lounges.length === 1 ? loungeLabel(lounges[0]) : `the lounges at ${trip.airport_code}`}.</p>

@@ -1,19 +1,19 @@
 // Copy prompt > any AI > paste the JSON back > review > register.
 // Nothing touches the document before the final button.
 import { useEffect, useMemo, useState } from 'react'
-import { Field, Icon, PageTitle, Segmented, SelectField, TextField, go } from '../components/ui'
+import { Field, Icon, PageTitle, Segmented, SelectField, go } from '../components/ui'
 import { useStore } from '../store/useStore'
-import { applyLoungesImport, applyRulesImport, applySpendImport, applyTripsImport, markDuplicates, parsePaste } from '../lib/importer'
+import { applyLoungesImport, applyRulesImport, applySpendImport, applyTripsImport, markDuplicates, missingFromImport, parsePaste } from '../lib/importer'
 import { buildLoungesPrompt, buildRulesPrompt, buildSpendPrompt, buildTripPrompt } from '../lib/prompts'
 import { QUOTA_PERIODS, SPEND_TYPE_LABEL, cardLabel, emptyCard, loungeLabel } from '../lib/schema'
 import { formatDate, todayIso } from '../lib/dates'
-import { money, spendNote } from '../lib/engine'
+import { liveRules, money, spendNote } from '../lib/engine'
 import { copyText } from '../lib/platform'
 
 const KINDS = [['rules', 'Bank T&C'], ['lounges', 'Lounges'], ['spend', 'Card spend'], ['trips', 'Trip']]
 const kindFrom = (k) => (KINDS.some(([x]) => x === k) ? k : 'rules')
 const KIND_OF_RESULT = { rules: 'rules', spends: 'spend', lounges: 'lounges', trips: 'trips' }
-const DONE_ROUTE = { rules: 'library', spend: 'spend', lounges: 'find', trips: 'trips' }
+const DONE_ROUTE = { rules: 'library', spend: 'spend', lounges: 'library', trips: 'trips' }
 const FLIGHT = { international: 'International', domestic: 'Domestic', unknown: 'Flight type not stated' }
 
 const ISSUE_UI = {
@@ -109,7 +109,7 @@ function RuleDraft({ draft, doc, onChange }) {
   )
 }
 
-function RulesPreview({ preview, setPreview, onDone }) {
+function RulesPreview({ preview, setPreview, onDone, documentId }) {
   const doc = useStore((s) => s.doc)
   const replaceDoc = useStore((s) => s.replaceDoc)
   const showToast = useStore((s) => s.showToast)
@@ -120,6 +120,7 @@ function RulesPreview({ preview, setPreview, onDone }) {
   function register() {
     const { doc: next, added, replaced, loungesAdded } = applyRulesImport(doc, preview, {
       today: todayIso(),
+      documentId: documentId || null,
       newCard: (c) => ({ ...emptyCard(), bank: c.bank || 'Unknown bank', name: c.name || 'Unknown card' }),
     })
     replaceDoc(next)
@@ -143,12 +144,11 @@ function RulesPreview({ preview, setPreview, onDone }) {
         <div className="card divide-y divide-slate-100">
           {preview.lounges.map((l, i) => (
             <label key={l.lounge.lounge_id} className="flex items-start gap-2.5 p-3">
-              <input type="checkbox" className="mt-1 h-5 w-5" checked={l.include} onChange={(e) => patchLounge(i, { include: e.target.checked })} />
+              <input type="checkbox" className="mt-1 h-5 w-5" disabled={l.duplicate} checked={l.include || l.duplicate} onChange={(e) => patchLounge(i, { include: e.target.checked })} />
               <span>
                 <span className="block text-sm font-medium text-slate-800">{loungeLabel(l.lounge)}</span>
                 <span className="block text-xs text-slate-500">
-                  {(l.lounge.networks || []).join(', ')}
-                  {l.duplicate ? ' · Already saved' : ''}
+                  {[(l.lounge.networks || []).join(', '), l.duplicate ? 'Already saved' : ''].filter(Boolean).join(' · ')}
                 </span>
               </span>
             </label>
@@ -219,33 +219,50 @@ function SpendPreview({ preview, setPreview, onDone }) {
   )
 }
 
-function LoungesPreview({ preview, setPreview, onDone }) {
+function LoungesPreview({ preview, setPreview, onDone, documentId }) {
   const doc = useStore((s) => s.doc)
   const replaceDoc = useStore((s) => s.replaceDoc)
   const showToast = useStore((s) => s.showToast)
   const patch = (i, include) => setPreview((x) => ({ ...x, lounges: x.lounges.map((r, n) => (n === i ? { ...r, include } : r)) }))
-  const setMap = (i, mapTo) => setPreview((x) => ({ ...x, programmes: x.programmes.map((p, n) => (n === i ? { ...p, mapTo } : p)) }))
   const count = preview.lounges.filter((r) => r.include).length
+  const rules = preview.card_id ? liveRules(doc, preview.card_id, todayIso()) : []
+  const rule = rules.find((r) => r.rule_id === preview.rule_id)
+  const missing = rule ? missingFromImport(doc, preview) : []
+
+  const chooseCard = (card_id) => setPreview((x) => ({ ...x, card_id: card_id || '', rule_id: card_id ? liveRules(doc, card_id, todayIso())[0]?.rule_id || '' : '' }))
 
   function commit() {
-    const { doc: next, added } = applyLoungesImport(doc, preview)
+    const { doc: next, linked } = applyLoungesImport(doc, preview, { documentId: documentId || null })
     replaceDoc(next)
-    showToast(`${added} lounge${added === 1 ? '' : 's'} added. Check each one before relying on it.`)
+    showToast(`${linked} lounge${linked === 1 ? '' : 's'} on this card’s list`)
     onDone()
   }
 
   return (
     <section className="space-y-3" aria-label="Review the lounges">
-      <h2 className="font-semibold text-night-900">3. Review, then add</h2>
-      <p className="text-sm text-slate-600">These arrive as Unverified until you check them. A wrong programme could show a card as eligible when it isn’t.</p>
-      {preview.programmes.some((p) => p.known.length > 0) && (
-        <div className="card space-y-3 p-3.5">
-          <p className="text-sm font-medium text-night-900">Programmes your cards don’t mention</p>
-          {preview.programmes.map((p, i) => p.known.length > 0 && (
-            <SelectField key={p.name} label={`Is “${p.name}” one of these?`} value={p.mapTo} onChange={(v) => setMap(i, v || '')} options={p.known.map((k) => [k, k])} placeholder="No, it’s a different programme" />
-          ))}
-        </div>
-      )}
+      <h2 className="font-semibold text-night-900">3. Review, then add to the card</h2>
+      {preview.source_document && <p className="text-sm text-slate-600">Source: {preview.source_document}</p>}
+      <div className="card space-y-3 p-3.5">
+        <SelectField label="Card" value={preview.card_id} onChange={chooseCard} options={doc.cards.map((c) => [c.card_id, cardLabel(c)])} placeholder="Choose a card" />
+        {rules.length > 1 && (
+          <SelectField label="Benefit" value={preview.rule_id} onChange={(rule_id) => setPreview((x) => ({ ...x, rule_id: rule_id || '' }))} options={rules.map((r) => [r.rule_id, r.title || r.network])} />
+        )}
+        {preview.card_id && !rules.length && (
+          <p className="text-sm text-amber-800">This card has no T&C rule yet, so there’s nothing to attach these lounges to. Import its Bank T&C first.</p>
+        )}
+        <SelectField
+          label="What does the document cover?"
+          value={preview.scope}
+          onChange={(scope) => setPreview((x) => ({ ...x, scope: scope || 'network' }))}
+          options={[['specific', 'Only these lounges'], ['network', `Any lounge in ${rule?.network || 'the programme'}`]]}
+        />
+        {missing.length > 0 && (
+          <label className="flex items-start gap-2.5 text-sm text-slate-700">
+            <input type="checkbox" className="mt-0.5 h-5 w-5" checked={preview.remove_missing} onChange={(e) => setPreview((x) => ({ ...x, remove_missing: e.target.checked }))} />
+            <span>Remove {missing.length} lounge{missing.length === 1 ? '' : 's'} this document doesn’t name: {missing.map((l) => l.name).join(', ')}</span>
+          </label>
+        )}
+      </div>
       <ul className="card divide-y divide-slate-100">
         {preview.lounges.map((r, i) => (
           <li key={r.lounge.lounge_id}>
@@ -254,9 +271,9 @@ function LoungesPreview({ preview, setPreview, onDone }) {
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium text-slate-800">{loungeLabel(r.lounge)}</span>
                 <span className="block text-xs text-slate-500">
-                  {[(r.lounge.networks || []).join(', '), r.lounge.hours, r.duplicate ? 'Already saved' : ''].filter(Boolean).join(' · ')}
+                  {[r.lounge.airport_name, r.lounge.country, r.lounge.hours, r.existing_id ? 'Already saved' : ''].filter(Boolean).join(' · ')}
                 </span>
-                {r.lounge.source_url && <span className="block truncate text-xs text-slate-500">{r.lounge.source_url}</span>}
+                {r.quote && <span className="mt-0.5 block border-l-2 border-brass-400 pl-2 text-xs italic text-slate-600">“{r.quote}”</span>}
                 {r.issues.map((x, n) => (
                   <span key={n} className="block text-xs text-amber-800">{x.message}</span>
                 ))}
@@ -265,8 +282,8 @@ function LoungesPreview({ preview, setPreview, onDone }) {
           </li>
         ))}
       </ul>
-      <button className="btn-accent w-full sm:w-auto" disabled={!count} onClick={commit}>
-        Add {count} lounge{count === 1 ? '' : 's'}
+      <button className="btn-accent w-full sm:w-auto" disabled={!count || !rule} onClick={commit}>
+        Add {count} lounge{count === 1 ? '' : 's'} to this card
       </button>
     </section>
   )
@@ -319,8 +336,7 @@ export default function ImportScreen({ arg }) {
   const [kindArg, docArg] = (arg || '').split('/')
   const [kind, setKind] = useState(kindFrom(kindArg))
   const [docId, setDocId] = useState(kindArg === 'lounges' ? '' : docArg || '')
-  const [target, setTarget] = useState(kindArg === 'lounges' ? decodeURIComponent(docArg || '') : '')
-  const [cardId, setCardId] = useState('')
+  const [cardId, setCardId] = useState(kindArg === 'lounges' ? docArg || '' : '')
   const [text, setText] = useState('')
   const [error, setError] = useState('')
   const [preview, setPreview] = useState(null)
@@ -328,17 +344,17 @@ export default function ImportScreen({ arg }) {
 
   useEffect(() => {
     setKind(kindFrom(kindArg))
-    if (kindArg === 'lounges') setTarget(decodeURIComponent(docArg || ''))
+    if (kindArg === 'lounges') setCardId(docArg || '')
     else if (docArg) setDocId(docArg)
   }, [kindArg, docArg])
 
   const prompt = useMemo(() => {
     if (kind === 'spend') return buildSpendPrompt(doc.cards.find((c) => c.card_id === cardId))
     if (kind === 'trips') return buildTripPrompt()
-    if (kind === 'lounges') return buildLoungesPrompt(target, [...new Set(doc.rules.map((r) => r.network).filter(Boolean))])
     const tnc = doc.documents.find((d) => d.doc_id === docId)?.text || ''
+    if (kind === 'lounges') return buildLoungesPrompt(doc.cards.find((c) => c.card_id === cardId), tnc)
     return buildRulesPrompt(doc.cards.filter((c) => c.status !== 'closed'), tnc)
-  }, [kind, doc.cards, doc.documents, doc.rules, docId, cardId, target])
+  }, [kind, doc.cards, doc.documents, docId, cardId])
 
   async function copy() {
     const ok = await copyText(prompt)
@@ -358,6 +374,9 @@ export default function ImportScreen({ arg }) {
     setKind(KIND_OF_RESULT[result.kind])
     if (result.kind === 'spends' && !result.card_id && cardId) {
       setPreview({ ...result, card_id: cardId, rows: markDuplicates(result.rows, doc, cardId) })
+    } else if (result.kind === 'lounges' && cardId) {
+      // The card chosen in step 1 wins over the name the AI read from the document.
+      setPreview({ ...result, card_id: cardId, rule_id: liveRules(doc, cardId, todayIso())[0]?.rule_id || '' })
     } else {
       setPreview(result)
     }
@@ -395,8 +414,11 @@ export default function ImportScreen({ arg }) {
           </>
         ) : kind === 'lounges' ? (
           <>
-            <TextField label="Airport or programme" value={target} onChange={setTarget} placeholder="KUL, or Priority Pass at SIN" />
-            <p className="text-sm text-slate-600">Paste this into an AI chat that can search the web. It looks up each lounge and the programmes it accepts, so you don’t have to type them.</p>
+            <SelectField label="Card" value={cardId} onChange={(v) => setCardId(v || '')} options={doc.cards.map((c) => [c.card_id, cardLabel(c)])} placeholder="Choose a card" />
+            {doc.documents.length > 0 && (
+              <SelectField label="Include a saved T&C" value={docId} onChange={(v) => setDocId(v || '')} options={doc.documents.map((d) => [d.doc_id, d.title])} placeholder="No, I’ll attach or paste it in the AI chat" />
+            )}
+            <p className="text-sm text-slate-600">Reads the lounges named in this bank’s T&C or lounge list, and adds them to this card. Importing a Bank T&C already does this when the T&C names its lounges, so use this for a separate list. Paste the prompt into any AI chat{docId ? '' : ' and attach the document'}.</p>
           </>
         ) : kind === 'trips' ? (
           <p className="text-sm text-slate-600">Paste this into any AI chat and attach your e-ticket. It returns your departures, including the flight home, without your name or booking reference.</p>
@@ -435,9 +457,9 @@ export default function ImportScreen({ arg }) {
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       </section>
 
-      {preview?.kind === 'rules' && <RulesPreview preview={preview} setPreview={setPreview} onDone={done} />}
+      {preview?.kind === 'rules' && <RulesPreview preview={preview} setPreview={setPreview} onDone={done} documentId={docId} />}
       {preview?.kind === 'spends' && <SpendPreview preview={preview} setPreview={setPreview} onDone={done} />}
-      {preview?.kind === 'lounges' && <LoungesPreview preview={preview} setPreview={setPreview} onDone={done} />}
+      {preview?.kind === 'lounges' && <LoungesPreview preview={preview} setPreview={setPreview} onDone={done} documentId={docId} />}
       {preview?.kind === 'trips' && <TripsPreview preview={preview} setPreview={setPreview} onDone={done} />}
     </div>
   )

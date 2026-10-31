@@ -22,6 +22,19 @@ Return ONLY a JSON code block. No commentary before or after it.
       "title": "<short name, e.g. 'Plaza Premium complimentary access'>",
       "card": { "bank": "<issuing bank>", "name": "<card product name>" },
       "network": "<lounge programme, e.g. 'Plaza Premium', 'Priority Pass', 'DragonPass', or the lounge name>",
+      "lounge_coverage": "listed_only | whole_programme | null",
+      "lounges": [
+        {
+          "name": "<lounge name as the T&C prints it>",
+          "airport_code": "<IATA code, e.g. KUL, only if the T&C states it or the airport is unmistakable>",
+          "airport_name": "<airport name>",
+          "city": "<city or null>",
+          "country": "<country or null>",
+          "terminal": "<terminal or null>",
+          "zone": "<airside | landside | null>",
+          "hours": "<opening hours or null>"
+        }
+      ],
       "countries": ["<country names, or 'worldwide'>"],
       "flight_scope": "any | international | domestic | null",
       "quota": {
@@ -67,18 +80,6 @@ Return ONLY a JSON code block. No commentary before or after it.
         "<field name: quota, per_day_limit, condition, flight_scope, guest, penalty, effective_from>": "<verbatim sentence from the T&C>"
       }
     }
-  ],
-  "lounges": [
-    {
-      "name": "<lounge name>",
-      "networks": ["<programme>"],
-      "airport_code": "<IATA code, e.g. KUL>",
-      "airport_name": "<airport name>",
-      "country": "<country>",
-      "terminal": "<terminal or null>",
-      "zone": "<airside | landside | null>",
-      "hours": "<opening hours or null>"
-    }
   ]
 }
 \`\`\`
@@ -92,7 +93,8 @@ Return ONLY a JSON code block. No commentary before or after it.
 5. **Dates** are ISO \`YYYY-MM-DD\`. A document labelled only "Version: August 2026" gives \`effective_from\` as the first of that month, with confidence no higher than "medium", and the \`_source\` quotes the label. \`effective_to\` is null unless the T&C states an end date.
 6. **\`spend_holder\`**: "principal_only" if only the principal's spend counts; "same_holder" if each cardholder's own spend counts for their own visits; "any" if all cards on the account count.
 7. **\`excluded_spend_types\`** maps only exclusions the T&C names to the allowed values. Put the full wording, including anything that doesn't map, in \`excluded_spend_text\`.
-8. **\`lounges\`**: only lounges the T&C lists by name. Don't copy a whole directory, and use an empty array when it only points to a website.
+8. **\`lounges\` come from this document only.** List every lounge the T&C names for this card, inside that card's rule object. Don't search the web and don't add lounges from memory. If the T&C only points to a website or another list, use an empty array and say where the list is in \`notes\`.
+   **\`lounge_coverage\`**: "listed_only" if access is limited to the lounges named. "whole_programme" if any lounge in the programme qualifies, even when some are named as examples. Null if the T&C doesn't settle it.
 9. **\`confidence\`**: "high" only when the document is the bank's own T&C and is explicit about visits, the condition and the dates. Use "low" for a blog, comparison site, forum post, or unclear scan.`
 
 export function buildRulesPrompt(cards = [], tncText = '') {
@@ -103,45 +105,46 @@ export function buildRulesPrompt(cards = [], tncText = '') {
   return `${RULES_BODY}${mine}\n\n## The T&C\n\n${tnc}`
 }
 
-export function buildLoungesPrompt(target = '', programmes = []) {
-  const what = target.trim() || '<<< NAME THE AIRPORT OR PROGRAMME, E.G. KUL OR PRIORITY PASS AT SIN >>>'
-  const mine = programmes.length
-    ? `\n\nThe programmes my cards cover: ${programmes.join(', ')}. Spell a programme exactly this way when it is one of these, and list other programmes each lounge accepts too.`
-    : ''
-  return `You are building a list of airport lounges for my lounge tracker. Search the web and use each programme's official lounge finder or the airport's own website.
-
-Find the lounges for: ${what}${mine}
+export function buildLoungesPrompt(card, text = '') {
+  const name = card ? `${card.bank} ${card.name}`.trim() : '<my card>'
+  const doc = text.trim() || "<<< ATTACH THE BANK'S T&C OR LOUNGE LIST, OR PASTE ITS TEXT >>>"
+  return `You are reading a bank's document for my lounge tracker. I need the airport lounges that this document says my card can use. My card: ${name}.
 
 Return ONLY a JSON code block. No commentary before or after it.
 
 \`\`\`json
 {
   "schema": "${LOUNGES_SCHEMA}",
+  "source_document": "<document name and version, or null>",
+  "card": { "bank": "<issuing bank>", "name": "<card name>" },
+  "lounge_coverage": "listed_only | whole_programme | null",
   "lounges": [
     {
-      "name": "<lounge name>",
-      "networks": ["<every programme you can confirm it accepts, e.g. 'Plaza Premium', 'Priority Pass', 'DragonPass'>"],
-      "airport_code": "<IATA code, e.g. KUL>",
+      "name": "<lounge name as the document prints it>",
+      "airport_code": "<IATA code, e.g. KUL, only if stated or the airport is unmistakable>",
       "airport_name": "<airport name>",
-      "city": "<city>",
-      "country": "<country>",
+      "city": "<city or null>",
+      "country": "<country or null>",
       "terminal": "<terminal or null>",
       "zone": "<airside | landside | null>",
       "hours": "<opening hours or null>",
-      "notes": "<anything that limits access, such as international departures only, or null>",
-      "source_url": "<the page that confirms this lounge and its programmes>",
-      "confidence": "high | medium | low"
+      "notes": "<anything limiting access to this lounge, or null>",
+      "_source": "<the line of the document that names this lounge, verbatim>"
     }
   ]
 }
 \`\`\`
 
 Rules:
-1. **Never guess a programme.** My tracker uses \`networks\` to decide which of my cards get in, so a wrong programme could mean a surprise fee. List only programmes the source page confirms.
-2. **\`source_url\` is mandatory.** If you can't find a page confirming a lounge, leave that lounge out.
-3. If you can't browse the web, return \`"lounges": []\` rather than answering from memory.
-4. Use null for anything the source doesn't state.
-5. List each lounge once per terminal.`
+1. **Use this document only.** Don't search the web, and don't add lounges from memory or from a programme's directory. My tracker uses this list to decide whether my card gets in.
+2. Include only lounges this document names for my card. If it lists different lounges for different cards, leave out the others.
+3. **\`lounge_coverage\`**: "listed_only" if access is limited to the lounges named. "whole_programme" if any lounge in the programme qualifies, even when some are named as examples. Null if the document doesn't settle it.
+4. If the document names no lounges, return \`"lounges": []\`.
+5. Use null for anything the document doesn't state. List each lounge once per terminal.
+
+## The document
+
+${doc}`
 }
 
 export function buildTripPrompt() {

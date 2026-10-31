@@ -52,7 +52,7 @@ function LoungeHeader({ lounge, onClear, onPlan }) {
       </div>
       {lounge.verified === false && (
         <div className="rounded-lg bg-amber-50 p-2.5 text-sm text-amber-900">
-          <p><b>Unverified.</b> An AI found this lounge, so check it accepts these programmes.</p>
+          <p><b>Unverified.</b> This lounge didn’t come from a bank’s T&C, so check it accepts these programmes.</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-3">
             {lounge.source_url && <a className="font-medium underline" href={lounge.source_url} target="_blank" rel="noopener noreferrer">Open the source</a>}
             <button className="font-medium underline" onClick={() => upsert('lounges', { ...lounge, verified: true })}>I’ve checked it</button>
@@ -125,7 +125,6 @@ export default function FindScreen() {
     setQuery('')
   }
   const onLog = (res) => setLogging({ card_id: res.card.card_id, lounge_id: res.lounge.lounge_id, date: date || today, holder: f.holder, flight: f.flight })
-  const importTarget = query.trim() ? `import/lounges/${encodeURIComponent(query.trim())}` : 'import/lounges'
 
   if (!doc.cards.length) {
     return (
@@ -214,12 +213,12 @@ export default function FindScreen() {
               title={`No saved lounge matches “${query.trim()}”`}
               action={
                 <>
-                  <button className="btn-accent" onClick={() => go(importTarget)}><Icon name="import" size={16} /> Find it with AI</button>
+                  <button className="btn-accent" onClick={() => go('import/lounges')}><Icon name="import" size={16} /> Import a bank’s list</button>
                   <button className="btn-ghost" onClick={() => setAdding({ name: query.trim() })}>Add by hand</button>
                 </>
               }
             >
-              Copy a prompt into an AI chat with web search, then paste the answer back to add this airport’s lounges.
+              Lounges come from each bank’s T&C. If yours names this lounge, import it. Otherwise add it by hand.
             </Empty>
           )}
           {matchRows.map(({ lounge: l, rows: r }) => (
@@ -259,7 +258,7 @@ export default function FindScreen() {
           {rows.some((r) => r.status === 'not_covered') && (
             <details className="card p-3 text-sm">
               <summary className="cursor-pointer font-medium text-night-700">
-                {rows.filter((r) => r.status === 'not_covered').length} other cards don’t cover this lounge
+                {rows.filter((r) => r.status === 'not_covered').length === 1 ? '1 other card doesn’t' : `${rows.filter((r) => r.status === 'not_covered').length} other cards don’t`} cover this lounge
               </summary>
               <ul className="mt-2 space-y-2">
                 {rows.filter((r) => r.status === 'not_covered').map((r) => (
@@ -285,7 +284,7 @@ export default function FindScreen() {
             ))}
           </div>
           {!doc.lounges.length && (
-            <button className="btn-ghost w-full sm:w-auto" onClick={() => go('import/lounges')}><Icon name="import" size={16} /> Add lounges with AI</button>
+            <button className="btn-ghost w-full sm:w-auto" onClick={() => go('import/lounges')}><Icon name="import" size={16} /> Import a bank’s lounge list</button>
           )}
         </section>
       )}

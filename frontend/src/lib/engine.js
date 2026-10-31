@@ -208,7 +208,7 @@ export function coverage(rule, lounge, date) {
   }
   if (!lounge) return null
   if (rule.lounge_scope === 'specific') {
-    return (rule.lounge_ids || []).includes(lounge.lounge_id) ? null : 'This lounge is not on the rule’s lounge list.'
+    return (rule.lounge_ids || []).includes(lounge.lounge_id) ? null : 'This lounge isn’t on this card’s lounge list.'
   }
   if (!(lounge.networks || []).some((n) => sameProgramme(n, rule.network))) {
     return `This lounge is not in ${rule.network || 'the rule’s network'}.`
@@ -428,6 +428,18 @@ export function findAccess(doc, filters) {
         rankStatus(a.status) - rankStatus(b.status) ||
         cardLabel(a.card).localeCompare(cardLabel(b.card)),
     )
+}
+
+// ---------- lounges per card ----------
+
+export const liveRules = (doc, cardId, date) =>
+  doc.rules.filter((r) => r.card_id === cardId && (!r.effective_to || r.effective_to >= date) && (!r.effective_from || r.effective_from <= date))
+
+export const loungesForRule = (doc, rule, date) => doc.lounges.filter((l) => !coverage(rule, l, date))
+
+export function loungesForCard(doc, cardId, date) {
+  const rules = liveRules(doc, cardId, date)
+  return doc.lounges.filter((l) => rules.some((r) => !coverage(r, l, date)))
 }
 
 // ---------- lounge search ----------

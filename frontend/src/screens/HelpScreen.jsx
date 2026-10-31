@@ -36,7 +36,7 @@ export default function HelpScreen() {
           <Item>The bank’s current lounge T&C, as a PDF or text</Item>
           <Item>Your card anniversary (MM-DD), only if visits reset by card year</Item>
           <Item>Last 4 digits, optional. Never enter the full number</Item>
-          <Item>The lounges you use: name, airport code, country and programme</Item>
+          <Item>The bank’s lounge list, if the T&C doesn’t name its lounges</Item>
         </ul>
         <button className="btn-accent mt-2" onClick={() => go('import')}><Icon name="import" size={16} /> Start an import</button>
       </Section>
@@ -47,14 +47,14 @@ export default function HelpScreen() {
           <li>Paste the JSON answer back and tap Read it.</li>
           <li>Check the amber items and quotes, and pick the right card.</li>
           <li>Tap Register. The card and rule are saved.</li>
-          <li>Import › Lounges: name an airport or programme, and paste the AI’s answer back. Check each lounge, then mark it as checked.</li>
+          <li>Library › Banks: open the card and check its eligible lounges. If the T&C didn’t name them, use Import lounge list with the bank’s own list.</li>
           <li>Spend: add recent spend, or import a statement, if the card has a spend condition.</li>
           <li>Find: search a lounge and confirm the answers look right.</li>
         </ol>
       </Section>
 
       <Section title="How lounges and cards link">
-        <p className="text-sm text-slate-800">You don’t link them by hand. A card’s rule names a programme, such as Plaza Premium, and a lounge lists the programmes it accepts. When they match, that card’s rule applies to that lounge.</p>
+        <p className="text-sm text-slate-800">Each bank has its own T&C, and each T&C sets the lounges its card can use. Importing it adds those lounges to that card. If the T&C says any lounge in a programme counts, such as Plaza Premium, every saved lounge in that programme applies. Nothing is looked up on the web.</p>
       </Section>
 
       <Section title="Planning a trip">

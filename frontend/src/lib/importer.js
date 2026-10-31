@@ -2,7 +2,8 @@
 // forgiving: markdown fences, prose around the JSON, a bare array or object.
 // Everything is coerced towards the schema, and each coercion or gap is reported
 // as an issue so the preview shows it before anything is saved.
-import { DAY_WINDOWS, QUOTA_PERIODS, SPEND_TYPES, WINDOWS, emptyLounge, emptySpend, emptyTrip, normalizeRule, programmeKey, ruleGroup, sameProgramme, uid } from './schema'
+import { DAY_WINDOWS, QUOTA_PERIODS, SPEND_TYPES, WINDOWS, emptyLounge, emptySpend, emptyTrip, normalizeRule, ruleGroup, sameProgramme, uid } from './schema'
+import { liveRules } from './engine'
 import { addDays, todayIso } from './dates'
 import { LOUNGES_SCHEMA, RULES_SCHEMA, SPEND_SCHEMA, TRIPS_SCHEMA } from './prompts'
 
@@ -117,6 +118,8 @@ function cleanCardName(card) {
 
 // ---------- rules ----------
 
+const coverageScope = (value) => (coerceEnum(value, ['listed_only', 'whole_programme']) === 'listed_only' ? 'specific' : 'network')
+
 const PERIODS = QUOTA_PERIODS.map(([k]) => k)
 const WINDOW_KEYS = WINDOWS.map(([k]) => k)
 const TYPE_KEYS = SPEND_TYPES.map(([k]) => k)
@@ -196,8 +199,10 @@ function normalizeDraftRule(raw, sourceDocument, today) {
   if (!Object.keys(evidence).length) issues.push(issue('warn', '_source', 'No T&C quotes included, so check this one against the T&C'))
 
   const countries = asList(raw.countries)
+  const named = (Array.isArray(raw.lounges) ? raw.lounges : []).filter((l) => l && typeof l === 'object').map(normalizeDraftLounge).filter(Boolean)
   return {
     issues,
+    named,
     card: cleanCardName(raw.card),
     rule: normalizeRule({
       rule_id: uid('rule'),
@@ -205,7 +210,7 @@ function normalizeDraftRule(raw, sourceDocument, today) {
       group: 'pending',
       title: cleanText(raw.title) || network || 'Lounge access',
       network,
-      lounge_scope: 'network',
+      lounge_scope: coverageScope(raw.lounge_coverage),
       countries: countries.length ? countries : null,
       flight_scope: scope,
       quota,
@@ -289,7 +294,7 @@ export function parsePaste(text, { doc, today = todayIso() }) {
   }
   if (!data || typeof data !== 'object') return { kind: 'error', error: 'No rules or transactions found in that JSON.' }
 
-  if (data.schema === LOUNGES_SCHEMA) return parseLounges(data, doc)
+  if (data.schema === LOUNGES_SCHEMA) return parseLounges(data, doc, today)
   if (data.schema === TRIPS_SCHEMA || Array.isArray(data.trips)) return parseTrips(data, doc, today)
   if (data.schema === SPEND_SCHEMA || Array.isArray(data.transactions)) return parseSpends(data, doc)
   if (data.schema === RULES_SCHEMA || Array.isArray(data.rules) || Array.isArray(data.lounges)) return parseRules(data, doc, today)
@@ -303,22 +308,26 @@ function parseRules(data, doc, today) {
     const matched = matchCard(doc.cards, d.card.bank, d.card.name)
     const group = matched ? ruleGroup(matched.card_id, d.rule.network) : null
     const current = group ? doc.rules.find((r) => r.group === group && !r.effective_to) : null
-    const named = (data.lounges || []).flatMap((l) => asList(l?.networks ?? l?.network))
-    const programmes = [...doc.lounges.flatMap((l) => l.networks || []), ...named]
-    if (d.rule.network && !programmes.some((p) => sameProgramme(p, d.rule.network))) {
-      d.issues.push(issue('gap', 'network', `No saved lounge lists ${d.rule.network} yet. Import lounges next so this rule has somewhere to match.`))
+    const topLevel = (data.lounges || []).flatMap((l) => asList(l?.networks ?? l?.network))
+    const programmes = [...doc.lounges.flatMap((l) => l.networks || []), ...topLevel]
+    if (d.rule.lounge_scope === 'specific' && !d.named.length) {
+      d.issues.push(issue('gap', 'lounges', 'Limited to named lounges, but none are listed. Import the bank’s lounge list next.'))
+    } else if (!d.named.length && d.rule.network && !programmes.some((p) => sameProgramme(p, d.rule.network))) {
+      d.issues.push(issue('gap', 'lounges', `This T&C names no lounges, and no saved lounge lists ${d.rule.network} yet. Import the bank’s lounge list next, or add them in Library.`))
     }
     return {
       ...d,
+      lounge_keys: d.named.map(loungeKey),
       include: true,
       card_id: matched?.card_id || null,
       current: current || null,
       changes: current ? diffRule(current, d.rule) : [],
     }
   })
-  const lounges = (data.lounges || [])
-    .map(normalizeDraftLounge)
+  const seen = new Set()
+  const lounges = [...(data.lounges || []).map(normalizeDraftLounge), ...drafts.flatMap((d) => d.named)]
     .filter(Boolean)
+    .filter((l) => !seen.has(loungeKey(l)) && seen.add(loungeKey(l)))
     .map((l) => ({
       lounge: l,
       include: !doc.lounges.some((x) => loungeKey(x) === loungeKey(l)),
@@ -336,45 +345,42 @@ const cleanUrl = (value) => {
   return s && /^https?:\/\//i.test(s) ? s : ''
 }
 
-// A programme with no rule behind it may be a rule's programme worded differently.
-// When one name's words contain the other's, suggest treating them as the same.
-export function programmeChoices(lounges, rules) {
-  const known = [...new Set(rules.map((r) => r.network).filter(Boolean))]
-  const words = (s) => String(s).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+function parseLounges(data, doc, today) {
   const seen = new Set()
-  const out = []
-  for (const name of lounges.flatMap((l) => l.networks || [])) {
-    const key = programmeKey(name)
-    if (!key || seen.has(key) || known.some((k) => sameProgramme(k, name))) continue
-    seen.add(key)
-    const mine = words(name)
-    const near = known.find((k) => {
-      const theirs = words(k)
-      return mine.every((w) => theirs.includes(w)) || theirs.every((w) => mine.includes(w))
-    })
-    out.push({ name, mapTo: near || '', known })
-  }
-  return out
-}
-
-function parseLounges(data, doc) {
   const rows = (data.lounges || []).filter((l) => l && typeof l === 'object').map((raw) => {
     const lounge = normalizeDraftLounge(raw)
     if (!lounge) return null
-    lounge.city = cleanText(raw.city) || ''
     lounge.notes = cleanText(raw.notes) || ''
-    lounge.source_url = cleanUrl(raw.source_url)
-    lounge.verified = false
+    if (seen.has(loungeKey(lounge))) return null
+    seen.add(loungeKey(lounge))
     const issues = []
-    if (!lounge.source_url) issues.push(issue('warn', 'source_url', 'No source link, so check this lounge yourself'))
-    if (!lounge.networks.length) issues.push(issue('warn', 'networks', 'No programme listed, so no card can match it'))
     if (!lounge.airport_code) issues.push(issue('warn', 'airport_code', 'No airport code, so trips can’t find it'))
-    if (coerceEnum(raw.confidence, ['high', 'medium', 'low']) === 'low') issues.push(issue('warn', 'confidence', 'The AI marked this as low confidence'))
-    const duplicate = doc.lounges.some((x) => loungeKey(x) === loungeKey(lounge))
-    return { lounge, issues, include: !duplicate, duplicate }
+    if (!cleanText(raw._source)) issues.push(issue('warn', '_source', 'No quote from the document, so check this one yourself'))
+    const existing = doc.lounges.find((x) => loungeKey(x) === loungeKey(lounge))
+    return { lounge, issues, include: true, existing_id: existing?.lounge_id || null, quote: cleanText(raw._source) }
   }).filter(Boolean)
-  if (!rows.length) return { kind: 'error', error: 'That JSON has no lounges. If the AI can’t browse the web, try one that can.' }
-  return { kind: 'lounges', lounges: rows, programmes: programmeChoices(rows.map((r) => r.lounge), doc.rules) }
+  if (!rows.length) {
+    return { kind: 'error', error: 'That document names no lounges. Try the bank’s own lounge list, or add them by hand in Library.' }
+  }
+  const hint = cleanCardName(data.card)
+  const card = data.card ? matchCard(doc.cards, hint.bank, hint.name) : null
+  return {
+    kind: 'lounges',
+    card_id: card?.card_id || '',
+    rule_id: card ? liveRules(doc, card.card_id, today)[0]?.rule_id || '' : '',
+    scope: coverageScope(data.lounge_coverage),
+    source_document: cleanText(data.source_document),
+    remove_missing: false,
+    lounges: rows,
+  }
+}
+
+// Lounges on the rule's list that this document doesn't name.
+export function missingFromImport(doc, preview) {
+  const rule = doc.rules.find((r) => r.rule_id === preview.rule_id)
+  if (!rule) return []
+  const keys = new Set(preview.lounges.map((r) => loungeKey(r.lounge)))
+  return doc.lounges.filter((l) => (rule.lounge_ids || []).includes(l.lounge_id) && !keys.has(loungeKey(l)))
 }
 
 function parseTrips(data, doc, today) {
@@ -401,13 +407,35 @@ function parseTrips(data, doc, today) {
   return { kind: 'trips', rows }
 }
 
-export function applyLoungesImport(doc, preview) {
-  const rename = new Map(preview.programmes.filter((p) => p.mapTo).map((p) => [programmeKey(p.name), p.mapTo]))
-  const rows = preview.lounges.filter((r) => r.include).map((r) => ({
-    ...r.lounge,
-    networks: [...new Set(r.lounge.networks.map((n) => rename.get(programmeKey(n)) || n))],
-  }))
-  return { doc: { ...doc, lounges: [...doc.lounges, ...rows] }, added: rows.length }
+export function applyLoungesImport(doc, preview, { documentId = null } = {}) {
+  const rule = doc.rules.find((r) => r.rule_id === preview.rule_id)
+  if (!rule) return { doc, added: 0, linked: 0 }
+  let lounges = [...doc.lounges]
+  let added = 0
+  const ids = []
+  for (const row of preview.lounges) {
+    if (!row.include) continue
+    if (row.existing_id) ids.push(row.existing_id)
+    else {
+      lounges.push(row.lounge)
+      ids.push(row.lounge.lounge_id)
+      added += 1
+    }
+  }
+  lounges = withProgramme(lounges, ids, rule.network, preview.scope)
+  const dropped = preview.remove_missing ? new Set(missingFromImport(doc, preview).map((l) => l.lounge_id)) : new Set()
+  const kept = (rule.lounge_ids || []).filter((id) => !dropped.has(id))
+  const next = { ...rule, lounge_ids: [...new Set([...kept, ...ids])], lounge_scope: preview.scope }
+  return {
+    doc: {
+      ...doc,
+      lounges,
+      rules: doc.rules.map((r) => (r.rule_id === rule.rule_id ? next : r)),
+      documents: linkDocument(doc.documents, documentId, [rule.card_id]),
+    },
+    added,
+    linked: ids.length,
+  }
 }
 
 export function applyTripsImport(doc, preview) {
@@ -497,13 +525,38 @@ export function diffRule(oldRule, newRule) {
 
 // ---------- applying a reviewed import ----------
 
+// A whole-programme rule only reaches lounges tagged with that programme. A listed-only
+// rule doesn't need the tag, and adding it to a lounge another bank already saved would
+// put that lounge in reach of other cards on the programme.
+const withProgramme = (lounges, ids, network, scope) =>
+  lounges.map((l) => {
+    if (!ids.includes(l.lounge_id) || !network || (l.networks || []).some((n) => sameProgramme(n, network))) return l
+    return scope === 'network' || !(l.networks || []).length ? { ...l, networks: [...(l.networks || []), network] } : l
+  })
+
+const linkDocument = (documents, documentId, cardIds) =>
+  (documents || []).map((d) =>
+    d.doc_id === documentId ? { ...d, card_ids: [...new Set([...(d.card_ids || []), ...cardIds])] } : d,
+  )
+
 // Pure: returns the next doc. A new version closes the current rule of the group
 // the day before it starts, so past visits keep being judged by the old terms.
-export function applyRulesImport(doc, preview, { today = todayIso(), newCard } = {}) {
+export function applyRulesImport(doc, preview, { today = todayIso(), newCard, documentId = null } = {}) {
   const cards = [...doc.cards]
   let rules = [...doc.rules]
   let added = 0
   let replaced = 0
+  const usedCards = new Set()
+
+  // New lounges first, so each rule can point at its own list.
+  let lounges = [...doc.lounges]
+  let loungesAdded = 0
+  for (const l of preview.lounges || []) {
+    if (!l.include || l.duplicate) continue
+    lounges.push(l.lounge)
+    loungesAdded += 1
+  }
+  const idOf = (key) => lounges.find((x) => loungeKey(x) === key)?.lounge_id
 
   for (const d of preview.drafts) {
     if (!d.include) continue
@@ -518,9 +571,16 @@ export function applyRulesImport(doc, preview, { today = todayIso(), newCard } =
       }
     }
     const group = ruleGroup(cardId, d.rule.network)
-    const next = { ...d.rule, card_id: cardId, group }
-    const start = next.effective_from || today
+    usedCards.add(cardId)
     const current = rules.find((r) => r.group === group && !r.effective_to)
+    const ids = (d.lounge_keys || []).map(idOf).filter(Boolean)
+    // A T&C that names no lounges leaves the card's existing list in place.
+    const list = ids.length || !current
+      ? { lounge_ids: ids, lounge_scope: d.rule.lounge_scope }
+      : { lounge_ids: current.lounge_ids || [], lounge_scope: current.lounge_scope }
+    const next = { ...d.rule, ...list, card_id: cardId, group, document_id: documentId }
+    const start = next.effective_from || today
+    lounges = withProgramme(lounges, ids, next.network, next.lounge_scope)
     if (current && (current.effective_from || '') >= start) {
       // Same or later start: this corrects that version rather than following it.
       rules = rules.map((r) => (r.rule_id === current.rule_id ? { ...next, rule_id: current.rule_id, effective_from: next.effective_from ?? current.effective_from } : r))
@@ -535,14 +595,7 @@ export function applyRulesImport(doc, preview, { today = todayIso(), newCard } =
     }
   }
 
-  const lounges = [...doc.lounges]
-  let loungesAdded = 0
-  for (const l of preview.lounges || []) {
-    if (!l.include) continue
-    lounges.push(l.lounge)
-    loungesAdded += 1
-  }
-  return { doc: { ...doc, cards, rules, lounges }, added, replaced, loungesAdded }
+  return { doc: { ...doc, cards, rules, lounges, documents: linkDocument(doc.documents, documentId, [...usedCards]) }, added, replaced, loungesAdded }
 }
 
 export function applySpendImport(doc, preview, cardId) {
