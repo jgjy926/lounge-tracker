@@ -5,7 +5,7 @@ import { SpendForm } from '../components/forms'
 import { useStore } from '../store/useStore'
 import { SPEND_TYPE_LABEL, cardLabel } from '../lib/schema'
 import { formatDate, todayIso } from '../lib/dates'
-import { money } from '../lib/engine'
+import { money, spendNote } from '../lib/engine'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const monthLabel = (ym) => `${MONTHS[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`
@@ -15,6 +15,7 @@ export default function SpendScreen() {
   const [editing, setEditing] = useState(null)
   const [cardId, setCardId] = useState('')
   const [month, setMonth] = useState('')
+  const today = todayIso()
 
   const months = [...new Set(doc.spends.map((s) => s.date.slice(0, 7)))].sort().reverse()
   const groups = useMemo(() => {
@@ -34,12 +35,14 @@ export default function SpendScreen() {
     <div className="space-y-4">
       <PageTitle title="Spend">
         <button className="btn-ghost" onClick={() => go('import/spend')}>
-          <Icon name="import" size={16} /> Import
+          <Icon name="import" size={16} /> Import statement
         </button>
         <button className="btn-primary" disabled={!doc.cards.length} onClick={() => setEditing({ date: todayIso(), card_id: cardId })}>
           <Icon name="plus" size={16} /> Add
         </button>
       </PageTitle>
+
+      <p className="text-sm text-slate-600">Card transactions, so the app can count them towards conditions like RM500 spend. Add them by hand, or import a statement or banking app screenshot.</p>
 
       {doc.spends.length > 0 && (
         <div className="grid grid-cols-2 gap-3">
@@ -51,9 +54,9 @@ export default function SpendScreen() {
       {!doc.spends.length && (
         <Empty
           title="No spend recorded yet"
-          action={doc.cards.length ? <button className="btn-accent" onClick={() => go('import/spend')}>Import from a statement</button> : <button className="btn-accent" onClick={() => go('import')}>Import a T&C first</button>}
+          action={doc.cards.length ? <button className="btn-accent" onClick={() => go('import/spend')}>Import a statement</button> : <button className="btn-accent" onClick={() => go('import')}>Import a T&C first</button>}
         >
-          Add spend so the app can check conditions like RM500 in the 30 days around a visit. Only cards with a spend condition need this.
+          Only cards with a spend condition need this.
         </Empty>
       )}
 
@@ -75,6 +78,7 @@ export default function SpendScreen() {
                       {s.holder === 'supplementary' ? ' · Supp' : ''}
                       {s.overseas ? ' · Overseas' : ''}
                     </span>
+                    {spendNote(doc, s, today) && <span className="block text-xs text-amber-800">{spendNote(doc, s, today)}</span>}
                   </span>
                   <span className={`shrink-0 text-sm font-semibold ${s.amount < 0 ? 'text-emerald-700' : 'text-night-900'}`}>{money(s.amount)}</span>
                 </button>

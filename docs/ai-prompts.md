@@ -99,7 +99,46 @@ Return ONLY a JSON code block. No commentary before or after it.
 <<< PASTE THE FULL TERMS & CONDITIONS TEXT HERE, OR ATTACH THE PDF >>>
 ````
 
-## Statement to spend
+## Airport or programme to lounges
+
+````
+You are building a list of airport lounges for my lounge tracker. Search the web and use each programme's official lounge finder or the airport's own website.
+
+Find the lounges for: <<< NAME THE AIRPORT OR PROGRAMME, E.G. KUL OR PRIORITY PASS AT SIN >>>
+
+Return ONLY a JSON code block. No commentary before or after it.
+
+```json
+{
+  "schema": "lounge-directory-import/v1",
+  "lounges": [
+    {
+      "name": "<lounge name>",
+      "networks": ["<every programme you can confirm it accepts, e.g. 'Plaza Premium', 'Priority Pass', 'DragonPass'>"],
+      "airport_code": "<IATA code, e.g. KUL>",
+      "airport_name": "<airport name>",
+      "city": "<city>",
+      "country": "<country>",
+      "terminal": "<terminal or null>",
+      "zone": "<airside | landside | null>",
+      "hours": "<opening hours or null>",
+      "notes": "<anything that limits access, such as international departures only, or null>",
+      "source_url": "<the page that confirms this lounge and its programmes>",
+      "confidence": "high | medium | low"
+    }
+  ]
+}
+```
+
+Rules:
+1. **Never guess a programme.** My tracker uses `networks` to decide which of my cards get in, so a wrong programme could mean a surprise fee. List only programmes the source page confirms.
+2. **`source_url` is mandatory.** If you can't find a page confirming a lounge, leave that lounge out.
+3. If you can't browse the web, return `"lounges": []` rather than answering from memory.
+4. Use null for anything the source doesn't state.
+5. List each lounge once per terminal.
+````
+
+## Statement to card spend
 
 ````
 You are extracting credit-card transactions for my lounge tracker. I will attach a statement or banking-app screenshot for my card: <my card>.
@@ -134,4 +173,37 @@ Rules:
 ## The statement
 
 <<< ATTACH THE STATEMENT OR SCREENSHOT, OR PASTE ITS TEXT >>>
+````
+
+## E-ticket to trips
+
+````
+You are reading a flight booking for my lounge tracker. I will attach an e-ticket or itinerary. I need the departures only, because a lounge is used before departing.
+
+Return ONLY a JSON code block. No commentary before or after it.
+
+```json
+{
+  "schema": "lounge-trip-import/v1",
+  "trips": [
+    {
+      "name": "<short name for this flight, e.g. 'Tokyo' or 'Tokyo return'>",
+      "date": "YYYY-MM-DD",
+      "airport_code": "<IATA code of the airport I depart from>",
+      "flight_number": "<e.g. MH88, or null>",
+      "flight_type": "international | domestic | null"
+    }
+  ]
+}
+```
+
+Rules:
+1. One object per departure, including the return flight and any connection where I change planes.
+2. Use the local departure date as printed on the ticket.
+3. `flight_type` is international if the departure and arrival airports are in different countries. Use null if you can't tell.
+4. Leave out names, booking references, ticket numbers and prices.
+
+## The booking
+
+<<< ATTACH THE E-TICKET OR ITINERARY, OR PASTE ITS TEXT >>>
 ````

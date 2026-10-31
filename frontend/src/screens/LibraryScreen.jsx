@@ -60,6 +60,7 @@ function LoungesTab() {
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
+        <button className="btn-ghost mr-2" onClick={() => go('import/lounges')}><Icon name="import" size={16} /> Import</button>
         <button className="btn-ghost" onClick={() => setEditing({})}><Icon name="plus" size={16} /> Add lounge</button>
       </div>
       {doc.lounges.length > 0 && (
@@ -68,13 +69,13 @@ function LoungesTab() {
           <SelectField label="Programme" value={network} onChange={(v) => setNetwork(v || '')} options={networks.map((x) => [x, x])} placeholder="All programmes" />
         </div>
       )}
-      {!doc.lounges.length && <Empty title="No lounges yet">Add the lounges you actually use. There’s no need for a full directory.</Empty>}
+      {!doc.lounges.length && <Empty title="No lounges yet" action={<button className="btn-accent" onClick={() => go('import/lounges')}><Icon name="import" size={16} /> Add with AI</button>}>Add the lounges you actually use. There’s no need for a full directory.</Empty>}
       <ul className="grid gap-2 sm:grid-cols-2">
         {rows.map((l) => (
           <li key={l.lounge_id}>
             <button className="card block w-full p-3 text-left" onClick={() => setEditing(l)}>
               <p className="font-semibold text-night-900">{loungeLabel(l)}</p>
-              <p className="text-xs text-slate-500">{[(l.networks || []).join(', '), l.airport_name, l.country].filter(Boolean).join(' · ')}</p>
+              <p className="text-xs text-slate-500">{[(l.networks || []).join(', '), l.airport_name, l.country, l.verified === false ? 'Unverified' : ''].filter(Boolean).join(' · ')}</p>
             </button>
           </li>
         ))}

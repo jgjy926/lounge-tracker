@@ -13,6 +13,7 @@ const ID_KEY = {
   visits: 'visit_id',
   spends: 'spend_id',
   documents: 'doc_id',
+  trips: 'trip_id',
 }
 
 let sync
@@ -100,6 +101,7 @@ export const useStore = create((set, get) => {
         rules: doc.rules.filter((r) => r.card_id !== cardId),
         visits: doc.visits.filter((v) => v.card_id !== cardId),
         spends: doc.spends.filter((s) => s.card_id !== cardId),
+        trips: doc.trips.map((t) => (t.card_id === cardId ? { ...t, card_id: '' } : t)),
       })
     },
 

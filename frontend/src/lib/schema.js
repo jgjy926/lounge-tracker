@@ -45,9 +45,21 @@ const slug = (s) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
 
+// Rules and lounges name a programme in their own words, so "Plaza Premium Lounge"
+// and "Plaza Premium" must count as the same one.
+const programmeWords = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w && !['lounge', 'lounges', 'programme', 'program', 'network', 'the'].includes(w))
+
+export const programmeKey = (s) => programmeWords(s).join('')
+export const sameProgramme = (a, b) => Boolean(programmeKey(a)) && programmeKey(a) === programmeKey(b)
+
 // Versions of the same benefit share a group, so a new T&C version continues the
 // same quota count instead of starting afresh.
-export const ruleGroup = (cardId, network) => `${cardId}:${slug(network) || 'lounge'}`
+export const ruleGroup = (cardId, network) => `${cardId}:${slug(programmeWords(network).join(' ')) || slug(network) || 'lounge'}`
 
 export const defaultDocument = () => ({
   schema_version: SCHEMA_VERSION,
@@ -58,6 +70,7 @@ export const defaultDocument = () => ({
   visits: [],
   spends: [],
   documents: [],
+  trips: [],
 })
 
 export const emptyCard = () => ({
@@ -76,11 +89,14 @@ export const emptyLounge = () => ({
   networks: [],
   airport_code: '',
   airport_name: '',
+  city: '',
   country: '',
   terminal: '',
   zone: '',
   hours: '',
   notes: '',
+  source_url: '',
+  verified: true, // false until you confirm a lounge an AI found
 })
 
 export const emptyCondition = () => ({
@@ -153,6 +169,21 @@ export const emptySpend = () => ({
   note: '',
 })
 
+// One departure. A return flight is its own trip, because it leaves another airport.
+export const emptyTrip = () => ({
+  trip_id: uid('trip'),
+  name: '',
+  date: '',
+  airport_code: '',
+  flight_number: '',
+  flight: 'unknown', // 'international' | 'domestic' | 'unknown'
+  lounge_id: '', // empty: any lounge at the airport
+  card_id: '', // empty: the best card
+  holder: 'principal',
+  note: '',
+  visit_id: '', // set once the visit is logged
+})
+
 // Old or partial documents gain any fields added since they were written.
 export function normalizeDoc(raw) {
   const doc = { ...defaultDocument(), ...(raw || {}) }
@@ -161,6 +192,7 @@ export function normalizeDoc(raw) {
   doc.rules = doc.rules.map(normalizeRule)
   doc.visits = doc.visits.map((v) => ({ ...emptyVisit(), ...v }))
   doc.spends = doc.spends.map((s) => ({ ...emptySpend(), ...s }))
+  doc.trips = doc.trips.map((t) => ({ ...emptyTrip(), ...t }))
   return doc
 }
 

@@ -2,6 +2,8 @@
 // screen's "Copy prompt" copies these, and docs/ai-prompts.md is generated from them.
 export const RULES_SCHEMA = 'lounge-rules-import/v1'
 export const SPEND_SCHEMA = 'lounge-spend-import/v1'
+export const LOUNGES_SCHEMA = 'lounge-directory-import/v1'
+export const TRIPS_SCHEMA = 'lounge-trip-import/v1'
 
 const SPEND_TYPE_LIST = 'instalment, balance_transfer, cash_advance, fee, ewallet, government, insurance, utilities'
 
@@ -99,6 +101,78 @@ export function buildRulesPrompt(cards = [], tncText = '') {
     : ''
   const tnc = tncText.trim() || '<<< PASTE THE FULL TERMS & CONDITIONS TEXT HERE, OR ATTACH THE PDF >>>'
   return `${RULES_BODY}${mine}\n\n## The T&C\n\n${tnc}`
+}
+
+export function buildLoungesPrompt(target = '', programmes = []) {
+  const what = target.trim() || '<<< NAME THE AIRPORT OR PROGRAMME, E.G. KUL OR PRIORITY PASS AT SIN >>>'
+  const mine = programmes.length
+    ? `\n\nThe programmes my cards cover: ${programmes.join(', ')}. Spell a programme exactly this way when it is one of these, and list other programmes each lounge accepts too.`
+    : ''
+  return `You are building a list of airport lounges for my lounge tracker. Search the web and use each programme's official lounge finder or the airport's own website.
+
+Find the lounges for: ${what}${mine}
+
+Return ONLY a JSON code block. No commentary before or after it.
+
+\`\`\`json
+{
+  "schema": "${LOUNGES_SCHEMA}",
+  "lounges": [
+    {
+      "name": "<lounge name>",
+      "networks": ["<every programme you can confirm it accepts, e.g. 'Plaza Premium', 'Priority Pass', 'DragonPass'>"],
+      "airport_code": "<IATA code, e.g. KUL>",
+      "airport_name": "<airport name>",
+      "city": "<city>",
+      "country": "<country>",
+      "terminal": "<terminal or null>",
+      "zone": "<airside | landside | null>",
+      "hours": "<opening hours or null>",
+      "notes": "<anything that limits access, such as international departures only, or null>",
+      "source_url": "<the page that confirms this lounge and its programmes>",
+      "confidence": "high | medium | low"
+    }
+  ]
+}
+\`\`\`
+
+Rules:
+1. **Never guess a programme.** My tracker uses \`networks\` to decide which of my cards get in, so a wrong programme could mean a surprise fee. List only programmes the source page confirms.
+2. **\`source_url\` is mandatory.** If you can't find a page confirming a lounge, leave that lounge out.
+3. If you can't browse the web, return \`"lounges": []\` rather than answering from memory.
+4. Use null for anything the source doesn't state.
+5. List each lounge once per terminal.`
+}
+
+export function buildTripPrompt() {
+  return `You are reading a flight booking for my lounge tracker. I will attach an e-ticket or itinerary. I need the departures only, because a lounge is used before departing.
+
+Return ONLY a JSON code block. No commentary before or after it.
+
+\`\`\`json
+{
+  "schema": "${TRIPS_SCHEMA}",
+  "trips": [
+    {
+      "name": "<short name for this flight, e.g. 'Tokyo' or 'Tokyo return'>",
+      "date": "YYYY-MM-DD",
+      "airport_code": "<IATA code of the airport I depart from>",
+      "flight_number": "<e.g. MH88, or null>",
+      "flight_type": "international | domestic | null"
+    }
+  ]
+}
+\`\`\`
+
+Rules:
+1. One object per departure, including the return flight and any connection where I change planes.
+2. Use the local departure date as printed on the ticket.
+3. \`flight_type\` is international if the departure and arrival airports are in different countries. Use null if you can't tell.
+4. Leave out names, booking references, ticket numbers and prices.
+
+## The booking
+
+<<< ATTACH THE E-TICKET OR ITINERARY, OR PASTE ITS TEXT >>>`
 }
 
 export function buildSpendPrompt(card) {

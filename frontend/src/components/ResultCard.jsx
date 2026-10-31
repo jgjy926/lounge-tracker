@@ -77,7 +77,7 @@ export function ResultDetail({ result }) {
   )
 }
 
-export default function ResultCard({ result, onLog, defaultOpen = false }) {
+export default function ResultCard({ result, onLog, defaultOpen = false, hideLounge = false }) {
   const [open, setOpen] = useState(defaultOpen)
   const ui = STATUS_UI[result.status] || STATUS_UI.not_covered
   const hasDetail = result.rule
@@ -92,7 +92,7 @@ export default function ResultCard({ result, onLog, defaultOpen = false }) {
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h3 className="font-semibold text-night-900">{cardLabel(result.card)}</h3>
-            {result.lounge && <p className="text-sm text-slate-600">{loungeLabel(result.lounge)}</p>}
+            {result.lounge && !hideLounge && <p className="text-sm text-slate-600">{loungeLabel(result.lounge)}</p>}
           </div>
           <StatusPill status={result.status} />
         </div>

@@ -1,6 +1,6 @@
 // Regenerates docs/ai-prompts.md from src/lib/prompts.js, so the doc can't drift.
 import fs from 'node:fs'
-import { buildRulesPrompt, buildSpendPrompt } from '../src/lib/prompts.js'
+import { buildLoungesPrompt, buildRulesPrompt, buildSpendPrompt, buildTripPrompt } from '../src/lib/prompts.js'
 
 const out = `# AI prompts
 
@@ -13,10 +13,22 @@ ${'````'}
 ${buildRulesPrompt()}
 ${'````'}
 
-## Statement to spend
+## Airport or programme to lounges
+
+${'````'}
+${buildLoungesPrompt()}
+${'````'}
+
+## Statement to card spend
 
 ${'````'}
 ${buildSpendPrompt()}
+${'````'}
+
+## E-ticket to trips
+
+${'````'}
+${buildTripPrompt()}
 ${'````'}
 `
 fs.mkdirSync(new URL('../../docs/', import.meta.url), { recursive: true })

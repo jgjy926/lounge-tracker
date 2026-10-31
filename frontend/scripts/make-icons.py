@@ -118,6 +118,8 @@ def vectors():
     mono = (f'    <path android:fillColor="#FFFFFFFF" android:pathData="{chair}"/>\n'
             f'    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="{badge}"/>\n')
     write(os.path.join(RES, 'drawable', 'ic_launcher_monochrome.xml'), VEC_HEAD + mono + '</vector>\n')
+    # Android shows notification icons as a white silhouette, so this is the same shape.
+    write(os.path.join(RES, 'drawable', 'ic_stat_notify.xml'), VEC_HEAD + mono + '</vector>\n')
 
     adaptive = ('<?xml version="1.0" encoding="utf-8"?>\n'
                 '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'

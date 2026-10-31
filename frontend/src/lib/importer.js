@@ -2,9 +2,9 @@
 // forgiving: markdown fences, prose around the JSON, a bare array or object.
 // Everything is coerced towards the schema, and each coercion or gap is reported
 // as an issue so the preview shows it before anything is saved.
-import { DAY_WINDOWS, QUOTA_PERIODS, SPEND_TYPES, WINDOWS, emptyLounge, emptySpend, normalizeRule, ruleGroup, uid } from './schema'
+import { DAY_WINDOWS, QUOTA_PERIODS, SPEND_TYPES, WINDOWS, emptyLounge, emptySpend, emptyTrip, normalizeRule, programmeKey, ruleGroup, sameProgramme, uid } from './schema'
 import { addDays, todayIso } from './dates'
-import { RULES_SCHEMA, SPEND_SCHEMA } from './prompts'
+import { LOUNGES_SCHEMA, RULES_SCHEMA, SPEND_SCHEMA, TRIPS_SCHEMA } from './prompts'
 
 const issue = (level, field, message) => ({ level, field, message })
 const pad = (n) => String(n).padStart(2, '0')
@@ -289,6 +289,8 @@ export function parsePaste(text, { doc, today = todayIso() }) {
   }
   if (!data || typeof data !== 'object') return { kind: 'error', error: 'No rules or transactions found in that JSON.' }
 
+  if (data.schema === LOUNGES_SCHEMA) return parseLounges(data, doc)
+  if (data.schema === TRIPS_SCHEMA || Array.isArray(data.trips)) return parseTrips(data, doc, today)
   if (data.schema === SPEND_SCHEMA || Array.isArray(data.transactions)) return parseSpends(data, doc)
   if (data.schema === RULES_SCHEMA || Array.isArray(data.rules) || Array.isArray(data.lounges)) return parseRules(data, doc, today)
   return { kind: 'error', error: 'No rules or transactions found in that JSON.' }
@@ -301,6 +303,11 @@ function parseRules(data, doc, today) {
     const matched = matchCard(doc.cards, d.card.bank, d.card.name)
     const group = matched ? ruleGroup(matched.card_id, d.rule.network) : null
     const current = group ? doc.rules.find((r) => r.group === group && !r.effective_to) : null
+    const named = (data.lounges || []).flatMap((l) => asList(l?.networks ?? l?.network))
+    const programmes = [...doc.lounges.flatMap((l) => l.networks || []), ...named]
+    if (d.rule.network && !programmes.some((p) => sameProgramme(p, d.rule.network))) {
+      d.issues.push(issue('gap', 'network', `No saved lounge lists ${d.rule.network} yet. Import lounges next so this rule has somewhere to match.`))
+    }
     return {
       ...d,
       include: true,
@@ -322,6 +329,91 @@ function parseRules(data, doc, today) {
 }
 
 const loungeKey = (l) => `${l.airport_code}|${l.name}|${l.terminal}`.toLowerCase()
+
+// Only a web address is kept, because the app renders it as a link.
+const cleanUrl = (value) => {
+  const s = cleanText(value)
+  return s && /^https?:\/\//i.test(s) ? s : ''
+}
+
+// A programme with no rule behind it may be a rule's programme worded differently.
+// When one name's words contain the other's, suggest treating them as the same.
+export function programmeChoices(lounges, rules) {
+  const known = [...new Set(rules.map((r) => r.network).filter(Boolean))]
+  const words = (s) => String(s).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+  const seen = new Set()
+  const out = []
+  for (const name of lounges.flatMap((l) => l.networks || [])) {
+    const key = programmeKey(name)
+    if (!key || seen.has(key) || known.some((k) => sameProgramme(k, name))) continue
+    seen.add(key)
+    const mine = words(name)
+    const near = known.find((k) => {
+      const theirs = words(k)
+      return mine.every((w) => theirs.includes(w)) || theirs.every((w) => mine.includes(w))
+    })
+    out.push({ name, mapTo: near || '', known })
+  }
+  return out
+}
+
+function parseLounges(data, doc) {
+  const rows = (data.lounges || []).filter((l) => l && typeof l === 'object').map((raw) => {
+    const lounge = normalizeDraftLounge(raw)
+    if (!lounge) return null
+    lounge.city = cleanText(raw.city) || ''
+    lounge.notes = cleanText(raw.notes) || ''
+    lounge.source_url = cleanUrl(raw.source_url)
+    lounge.verified = false
+    const issues = []
+    if (!lounge.source_url) issues.push(issue('warn', 'source_url', 'No source link, so check this lounge yourself'))
+    if (!lounge.networks.length) issues.push(issue('warn', 'networks', 'No programme listed, so no card can match it'))
+    if (!lounge.airport_code) issues.push(issue('warn', 'airport_code', 'No airport code, so trips can’t find it'))
+    if (coerceEnum(raw.confidence, ['high', 'medium', 'low']) === 'low') issues.push(issue('warn', 'confidence', 'The AI marked this as low confidence'))
+    const duplicate = doc.lounges.some((x) => loungeKey(x) === loungeKey(lounge))
+    return { lounge, issues, include: !duplicate, duplicate }
+  }).filter(Boolean)
+  if (!rows.length) return { kind: 'error', error: 'That JSON has no lounges. If the AI can’t browse the web, try one that can.' }
+  return { kind: 'lounges', lounges: rows, programmes: programmeChoices(rows.map((r) => r.lounge), doc.rules) }
+}
+
+function parseTrips(data, doc, today) {
+  const rows = (data.trips || []).filter((t) => t && typeof t === 'object').map((raw) => {
+    const date = coerceDate(raw.date)
+    const issues = []
+    if (date.error) issues.push(issue('warn', 'date', date.error))
+    const code = (cleanText(raw.airport_code) || '').toUpperCase()
+    if (!code) issues.push(issue('warn', 'airport_code', 'No airport code'))
+    if (date.value && date.value < today) issues.push(issue('note', 'date', 'This date has passed'))
+    const trip = {
+      ...emptyTrip(),
+      name: cleanText(raw.name) || '',
+      date: date.value || '',
+      airport_code: code,
+      flight_number: (cleanText(raw.flight_number) || '').toUpperCase(),
+      flight: coerceEnum(raw.flight_type ?? raw.flight, ['international', 'domestic']) || 'unknown',
+    }
+    const valid = Boolean(date.value && code)
+    const duplicate = doc.trips.some((t) => t.date === trip.date && t.airport_code === code)
+    return { trip, issues, valid, duplicate, include: valid && !duplicate }
+  })
+  if (!rows.length) return { kind: 'error', error: 'That JSON has no flights.' }
+  return { kind: 'trips', rows }
+}
+
+export function applyLoungesImport(doc, preview) {
+  const rename = new Map(preview.programmes.filter((p) => p.mapTo).map((p) => [programmeKey(p.name), p.mapTo]))
+  const rows = preview.lounges.filter((r) => r.include).map((r) => ({
+    ...r.lounge,
+    networks: [...new Set(r.lounge.networks.map((n) => rename.get(programmeKey(n)) || n))],
+  }))
+  return { doc: { ...doc, lounges: [...doc.lounges, ...rows] }, added: rows.length }
+}
+
+export function applyTripsImport(doc, preview) {
+  const rows = preview.rows.filter((r) => r.include && r.valid).map((r) => r.trip)
+  return { doc: { ...doc, trips: [...doc.trips, ...rows] }, added: rows.length }
+}
 
 function parseSpends(data, doc) {
   const hint = cleanCardName(data.card)

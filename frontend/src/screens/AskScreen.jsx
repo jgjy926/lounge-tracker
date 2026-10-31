@@ -102,7 +102,9 @@ export default function AskScreen() {
 
   return (
     <div className="flex min-h-full flex-col gap-4">
-      <PageTitle title="Ask" />
+      <PageTitle title="Ask">
+        <button className="btn-ghost" onClick={() => go('find')}><Icon name="find" size={16} /> Find</button>
+      </PageTitle>
 
       {!doc.rules.length ? (
         <Empty title="Nothing to answer from yet" action={<button className="btn-accent" onClick={() => go('import')}>Import a T&C</button>}>

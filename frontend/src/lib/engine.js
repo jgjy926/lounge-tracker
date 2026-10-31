@@ -15,7 +15,7 @@ import {
   formatDate,
   formatRange,
 } from './dates'
-import { DAY_WINDOWS, SPEND_TYPE_LABEL, cardLabel } from './schema'
+import { DAY_WINDOWS, SPEND_TYPE_LABEL, cardLabel, sameProgramme } from './schema'
 
 export const STALE_AFTER_DAYS = 180
 
@@ -210,7 +210,7 @@ export function coverage(rule, lounge, date) {
   if (rule.lounge_scope === 'specific') {
     return (rule.lounge_ids || []).includes(lounge.lounge_id) ? null : 'This lounge is not on the rule’s lounge list.'
   }
-  if (!(lounge.networks || []).some((n) => sameText(n, rule.network))) {
+  if (!(lounge.networks || []).some((n) => sameProgramme(n, rule.network))) {
     return `This lounge is not in ${rule.network || 'the rule’s network'}.`
   }
   const countries = rule.countries
@@ -342,6 +342,7 @@ export function evaluateRule(doc, rule, ctx) {
     checks.push(check('unknown', 'T&C check', `${when} Re-verify before relying on this.`))
   }
   if (rule.confidence === 'low') checks.push(check('warn', 'Import confidence', 'Marked low when imported'))
+  if (lounge?.verified === false) checks.push(check('warn', 'Lounge details', 'Found by AI and not confirmed yet. Check it accepts this programme'))
 
   if (rule.entry_requirements) base.reminders.push(`At entry: ${rule.entry_requirements}`)
   if (rule.penalty?.note && !blocked) base.reminders.push(`If conditions aren’t met: ${rule.penalty.note}`)
@@ -407,7 +408,7 @@ export function findAccess(doc, filters) {
   const lounges = doc.lounges
     .filter((l) => (loungeId ? l.lounge_id === loungeId : true))
     .filter((l) => (airport ? sameText(l.airport_code, airport) : true))
-    .filter((l) => (network ? (l.networks || []).some((n) => sameText(n, network)) : true))
+    .filter((l) => (network ? (l.networks || []).some((n) => sameProgramme(n, network)) : true))
   const narrowed = Boolean(loungeId || airport || network)
   const ctx = { date, today, holder, flight, guests }
 
@@ -427,6 +428,46 @@ export function findAccess(doc, filters) {
         rankStatus(a.status) - rankStatus(b.status) ||
         cardLabel(a.card).localeCompare(cardLabel(b.card)),
     )
+}
+
+// ---------- lounge search ----------
+
+// Names people use that no saved field would match.
+const AIRPORT_ALIASES = { klia: 'kul', klia2: 'kul', subang: 'szb', changi: 'sin', 'don mueang': 'dmk', suvarnabhumi: 'bkk', haneda: 'hnd', narita: 'nrt' }
+
+// Every word typed must appear somewhere on the lounge. An exact airport code ranks first.
+export function searchLounges(lounges, query) {
+  const q = String(query || '').trim().toLowerCase()
+  if (!q) return []
+  const words = q.split(/\s+/).map((w) => AIRPORT_ALIASES[w] || w)
+  const scored = []
+  for (const l of lounges) {
+    const code = String(l.airport_code || '').toLowerCase()
+    const text = [l.name, l.airport_code, l.airport_name, l.city, l.country, l.terminal, ...(l.networks || [])].join(' ').toLowerCase()
+    if (!words.every((w) => text.includes(w))) continue
+    scored.push({ l, score: words.includes(code) ? 0 : String(l.name || '').toLowerCase().startsWith(words[0]) ? 1 : 2 })
+  }
+  return scored
+    .sort((a, b) => a.score - b.score || String(a.l.name).localeCompare(String(b.l.name)))
+    .map((x) => x.l)
+}
+
+// Why a transaction won't count, going by the card's live rules. Null if it counts.
+export function spendNote(doc, spend, today) {
+  const rules = doc.rules.filter(
+    (r) => r.card_id === spend.card_id && r.condition?.type && r.condition.type !== 'none' && (!r.effective_to || r.effective_to >= today),
+  )
+  if (!rules.length) return null
+  if (rules.every((r) => (r.condition.excluded_spend_types || []).includes(spend.type))) {
+    return `Doesn’t count towards lounge spend: ${(SPEND_TYPE_LABEL[spend.type] || spend.type).toLowerCase()}`
+  }
+  if (spend.holder === 'supplementary' && rules.every((r) => r.condition.spend_holder === 'principal_only')) {
+    return 'Doesn’t count towards lounge spend: supplementary card'
+  }
+  if (!spend.overseas && rules.every((r) => r.condition.overseas_only)) {
+    return 'Doesn’t count towards lounge spend: not overseas'
+  }
+  return null
 }
 
 // ---------- visits & attention ----------

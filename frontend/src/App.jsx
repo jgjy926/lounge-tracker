@@ -4,7 +4,9 @@ import { Icon, go } from './components/ui'
 import { useStore } from './store/useStore'
 import { cloudEnabled } from './lib/api'
 import { installBackButton } from './lib/platform'
-import CheckScreen from './screens/CheckScreen'
+import { syncReminders } from './lib/reminders'
+import FindScreen from './screens/FindScreen'
+import TripsScreen from './screens/TripsScreen'
 import AskScreen from './screens/AskScreen'
 import VisitsScreen from './screens/VisitsScreen'
 import SpendScreen from './screens/SpendScreen'
@@ -14,21 +16,22 @@ import SettingsScreen from './screens/SettingsScreen'
 import HelpScreen from './screens/HelpScreen'
 
 const TABS = [
-  ['check', 'Check', 'check'],
-  ['ask', 'Ask', 'ask'],
+  ['find', 'Find', 'find'],
+  ['trips', 'Trips', 'trips'],
   ['visits', 'Visits', 'visits'],
   ['spend', 'Spend', 'spend'],
   ['library', 'Library', 'library'],
 ]
 const RAIL_EXTRA = [
+  ['ask', 'Ask', 'ask'],
   ['import', 'Import', 'import'],
   ['settings', 'Settings', 'gear'],
   ['help', 'Guide', 'help'],
 ]
 
 const readRoute = () => {
-  const [name = 'check', ...rest] = window.location.hash.replace(/^#\/?/, '').split('/')
-  return { name: name || 'check', arg: rest.join('/') }
+  const [name = 'find', ...rest] = window.location.hash.replace(/^#\/?/, '').split('/')
+  return { name: !name || name === 'check' ? 'find' : name, arg: rest.join('/') }
 }
 
 const SYNC_UI = {
@@ -44,7 +47,7 @@ function SyncStatus() {
   const status = useStore((s) => s.syncStatus)
   if (!cloudEnabled()) {
     return (
-      <button onClick={() => go('settings')} className="text-xs text-slate-300 underline-offset-2 hover:underline">
+      <button onClick={() => go('settings')} className="whitespace-nowrap text-xs text-slate-300 underline-offset-2 hover:underline">
         This device only
       </button>
     )
@@ -96,6 +99,7 @@ export default function App() {
   const ready = useStore((s) => s.ready)
   const pull = useStore((s) => s.pull)
   const flush = useStore((s) => s.flush)
+  const doc = useStore((s) => s.doc)
   const [route, setRoute] = useState(readRoute)
   const routeRef = useRef(route)
   routeRef.current = route
@@ -113,7 +117,7 @@ export default function App() {
     window.addEventListener('hashchange', onHash)
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('online', onOnline)
-    installBackButton(() => go('check'), () => routeRef.current.name === 'check')
+    installBackButton(() => go('find'), () => routeRef.current.name === 'find')
     return () => {
       window.removeEventListener('hashchange', onHash)
       document.removeEventListener('visibilitychange', onVisibility)
@@ -121,8 +125,16 @@ export default function App() {
     }
   }, [init, pull, flush])
 
+  // Phone reminders follow the data, including changes synced from another device.
+  useEffect(() => {
+    if (!ready) return undefined
+    const timer = setTimeout(() => syncReminders(doc), 1500)
+    return () => clearTimeout(timer)
+  }, [doc, ready])
+
   const screen = {
-    check: <CheckScreen />,
+    find: <FindScreen />,
+    trips: <TripsScreen />,
     ask: <AskScreen />,
     visits: <VisitsScreen />,
     spend: <SpendScreen />,
@@ -130,7 +142,7 @@ export default function App() {
     import: <ImportScreen arg={route.arg} />,
     settings: <SettingsScreen />,
     help: <HelpScreen />,
-  }[route.name] || <CheckScreen />
+  }[route.name] || <FindScreen />
 
   const navBtn = (name, label, icon) => {
     const active = route.name === name
@@ -140,8 +152,8 @@ export default function App() {
   return (
     <div className="flex h-full flex-col bg-slate-100">
       <header className="pad-safe-top bg-night-900 text-white lg:hidden">
-        <div className="flex h-12 items-center justify-between px-4">
-          <button className="flex items-center gap-2 font-semibold" onClick={() => go('check')}>
+        <div className="flex h-12 items-center justify-between gap-2 px-4">
+          <button className="flex min-w-0 items-center gap-2 whitespace-nowrap font-semibold" onClick={() => go('find')}>
             <img src="./icons/favicon-64.png" alt="" className="h-7 w-7 rounded-lg" />
             Lounge Tracker
           </button>

@@ -1,14 +1,20 @@
 // Copy prompt > any AI > paste the JSON back > review > register.
 // Nothing touches the document before the final button.
 import { useEffect, useMemo, useState } from 'react'
-import { Field, Icon, PageTitle, Segmented, SelectField, go } from '../components/ui'
+import { Field, Icon, PageTitle, Segmented, SelectField, TextField, go } from '../components/ui'
 import { useStore } from '../store/useStore'
-import { applyRulesImport, applySpendImport, markDuplicates, parsePaste } from '../lib/importer'
-import { buildRulesPrompt, buildSpendPrompt } from '../lib/prompts'
+import { applyLoungesImport, applyRulesImport, applySpendImport, applyTripsImport, markDuplicates, parsePaste } from '../lib/importer'
+import { buildLoungesPrompt, buildRulesPrompt, buildSpendPrompt, buildTripPrompt } from '../lib/prompts'
 import { QUOTA_PERIODS, SPEND_TYPE_LABEL, cardLabel, emptyCard, loungeLabel } from '../lib/schema'
 import { formatDate, todayIso } from '../lib/dates'
-import { money } from '../lib/engine'
+import { money, spendNote } from '../lib/engine'
 import { copyText } from '../lib/platform'
+
+const KINDS = [['rules', 'Bank T&C'], ['lounges', 'Lounges'], ['spend', 'Card spend'], ['trips', 'Trip']]
+const kindFrom = (k) => (KINDS.some(([x]) => x === k) ? k : 'rules')
+const KIND_OF_RESULT = { rules: 'rules', spends: 'spend', lounges: 'lounges', trips: 'trips' }
+const DONE_ROUTE = { rules: 'library', spend: 'spend', lounges: 'find', trips: 'trips' }
+const FLIGHT = { international: 'International', domestic: 'Domestic', unknown: 'Flight type not stated' }
 
 const ISSUE_UI = {
   gap: 'text-amber-800',
@@ -195,6 +201,9 @@ function SpendPreview({ preview, setPreview, onDone }) {
                   {r.spend.overseas ? ' · Overseas' : ''}
                   {r.duplicate ? ' · Already saved' : ''}
                 </span>
+                {preview.card_id && spendNote(doc, { ...r.spend, card_id: preview.card_id }, todayIso()) && (
+                  <span className="block text-xs text-amber-800">{spendNote(doc, { ...r.spend, card_id: preview.card_id }, todayIso())}</span>
+                )}
                 {r.issues.map((x, n) => (
                   <span key={n} className="block text-xs text-red-700">{x.message}</span>
                 ))}
@@ -210,11 +219,107 @@ function SpendPreview({ preview, setPreview, onDone }) {
   )
 }
 
+function LoungesPreview({ preview, setPreview, onDone }) {
+  const doc = useStore((s) => s.doc)
+  const replaceDoc = useStore((s) => s.replaceDoc)
+  const showToast = useStore((s) => s.showToast)
+  const patch = (i, include) => setPreview((x) => ({ ...x, lounges: x.lounges.map((r, n) => (n === i ? { ...r, include } : r)) }))
+  const setMap = (i, mapTo) => setPreview((x) => ({ ...x, programmes: x.programmes.map((p, n) => (n === i ? { ...p, mapTo } : p)) }))
+  const count = preview.lounges.filter((r) => r.include).length
+
+  function commit() {
+    const { doc: next, added } = applyLoungesImport(doc, preview)
+    replaceDoc(next)
+    showToast(`${added} lounge${added === 1 ? '' : 's'} added. Check each one before relying on it.`)
+    onDone()
+  }
+
+  return (
+    <section className="space-y-3" aria-label="Review the lounges">
+      <h2 className="font-semibold text-night-900">3. Review, then add</h2>
+      <p className="text-sm text-slate-600">These arrive as Unverified until you check them. A wrong programme could show a card as eligible when it isn’t.</p>
+      {preview.programmes.some((p) => p.known.length > 0) && (
+        <div className="card space-y-3 p-3.5">
+          <p className="text-sm font-medium text-night-900">Programmes your cards don’t mention</p>
+          {preview.programmes.map((p, i) => p.known.length > 0 && (
+            <SelectField key={p.name} label={`Is “${p.name}” one of these?`} value={p.mapTo} onChange={(v) => setMap(i, v || '')} options={p.known.map((k) => [k, k])} placeholder="No, it’s a different programme" />
+          ))}
+        </div>
+      )}
+      <ul className="card divide-y divide-slate-100">
+        {preview.lounges.map((r, i) => (
+          <li key={r.lounge.lounge_id}>
+            <label className="flex items-start gap-2.5 p-3">
+              <input type="checkbox" className="mt-1 h-5 w-5" checked={r.include} onChange={(e) => patch(i, e.target.checked)} />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-slate-800">{loungeLabel(r.lounge)}</span>
+                <span className="block text-xs text-slate-500">
+                  {[(r.lounge.networks || []).join(', '), r.lounge.hours, r.duplicate ? 'Already saved' : ''].filter(Boolean).join(' · ')}
+                </span>
+                {r.lounge.source_url && <span className="block truncate text-xs text-slate-500">{r.lounge.source_url}</span>}
+                {r.issues.map((x, n) => (
+                  <span key={n} className="block text-xs text-amber-800">{x.message}</span>
+                ))}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <button className="btn-accent w-full sm:w-auto" disabled={!count} onClick={commit}>
+        Add {count} lounge{count === 1 ? '' : 's'}
+      </button>
+    </section>
+  )
+}
+
+function TripsPreview({ preview, setPreview, onDone }) {
+  const doc = useStore((s) => s.doc)
+  const replaceDoc = useStore((s) => s.replaceDoc)
+  const showToast = useStore((s) => s.showToast)
+  const patch = (i, include) => setPreview((x) => ({ ...x, rows: x.rows.map((r, n) => (n === i ? { ...r, include } : r)) }))
+  const count = preview.rows.filter((r) => r.include && r.valid).length
+
+  function commit() {
+    const { doc: next, added } = applyTripsImport(doc, preview)
+    replaceDoc(next)
+    showToast(`${added} flight${added === 1 ? '' : 's'} added`)
+    onDone()
+  }
+
+  return (
+    <section className="space-y-3" aria-label="Review the flights">
+      <h2 className="font-semibold text-night-900">3. Review, then add</h2>
+      <ul className="card divide-y divide-slate-100">
+        {preview.rows.map((r, i) => (
+          <li key={r.trip.trip_id}>
+            <label className={`flex items-start gap-2.5 p-3 ${r.valid ? '' : 'opacity-60'}`}>
+              <input type="checkbox" className="mt-1 h-5 w-5" disabled={!r.valid} checked={r.include} onChange={(e) => patch(i, e.target.checked)} />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-slate-800">{r.trip.name || `${r.trip.airport_code || 'Unknown'} flight`}</span>
+                <span className="block text-xs text-slate-500">
+                  {[r.trip.date ? formatDate(r.trip.date) : 'No date', r.trip.airport_code, r.trip.flight_number, FLIGHT[r.trip.flight], r.duplicate ? 'Already saved' : ''].filter(Boolean).join(' · ')}
+                </span>
+                {r.issues.map((x, n) => (
+                  <span key={n} className="block text-xs text-amber-800">{x.message}</span>
+                ))}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <button className="btn-accent w-full sm:w-auto" disabled={!count} onClick={commit}>
+        Add {count} flight{count === 1 ? '' : 's'}
+      </button>
+    </section>
+  )
+}
+
 export default function ImportScreen({ arg }) {
   const doc = useStore((s) => s.doc)
   const [kindArg, docArg] = (arg || '').split('/')
-  const [kind, setKind] = useState(kindArg === 'spend' ? 'spend' : 'rules')
-  const [docId, setDocId] = useState(docArg || '')
+  const [kind, setKind] = useState(kindFrom(kindArg))
+  const [docId, setDocId] = useState(kindArg === 'lounges' ? '' : docArg || '')
+  const [target, setTarget] = useState(kindArg === 'lounges' ? decodeURIComponent(docArg || '') : '')
   const [cardId, setCardId] = useState('')
   const [text, setText] = useState('')
   const [error, setError] = useState('')
@@ -222,15 +327,18 @@ export default function ImportScreen({ arg }) {
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    setKind(kindArg === 'spend' ? 'spend' : 'rules')
-    if (docArg) setDocId(docArg)
+    setKind(kindFrom(kindArg))
+    if (kindArg === 'lounges') setTarget(decodeURIComponent(docArg || ''))
+    else if (docArg) setDocId(docArg)
   }, [kindArg, docArg])
 
   const prompt = useMemo(() => {
     if (kind === 'spend') return buildSpendPrompt(doc.cards.find((c) => c.card_id === cardId))
+    if (kind === 'trips') return buildTripPrompt()
+    if (kind === 'lounges') return buildLoungesPrompt(target, [...new Set(doc.rules.map((r) => r.network).filter(Boolean))])
     const tnc = doc.documents.find((d) => d.doc_id === docId)?.text || ''
     return buildRulesPrompt(doc.cards.filter((c) => c.status !== 'closed'), tnc)
-  }, [kind, doc.cards, doc.documents, docId, cardId])
+  }, [kind, doc.cards, doc.documents, doc.rules, docId, cardId, target])
 
   async function copy() {
     const ok = await copyText(prompt)
@@ -247,7 +355,7 @@ export default function ImportScreen({ arg }) {
       return
     }
     // The paste decides what it is, whichever tab it landed in.
-    setKind(result.kind === 'spends' ? 'spend' : 'rules')
+    setKind(KIND_OF_RESULT[result.kind])
     if (result.kind === 'spends' && !result.card_id && cardId) {
       setPreview({ ...result, card_id: cardId, rows: markDuplicates(result.rows, doc, cardId) })
     } else {
@@ -263,7 +371,7 @@ export default function ImportScreen({ arg }) {
   function done() {
     setPreview(null)
     setText('')
-    go(kind === 'spend' ? 'spend' : 'library')
+    go(DONE_ROUTE[kind])
   }
 
   return (
@@ -273,7 +381,7 @@ export default function ImportScreen({ arg }) {
         label="What to import"
         value={kind}
         onChange={(k) => { setKind(k); setPreview(null); setError('') }}
-        options={[['rules', 'Bank T&C'], ['spend', 'Statement']]}
+        options={KINDS}
       />
 
       <section className="card space-y-3 p-3.5" aria-label="Copy the prompt">
@@ -285,10 +393,17 @@ export default function ImportScreen({ arg }) {
             )}
             <p className="text-sm text-slate-600">Paste this into Claude, ChatGPT or Gemini{docId ? '' : ' and attach the bank’s T&C PDF'}. Use the bank’s own T&C rather than a blog.</p>
           </>
+        ) : kind === 'lounges' ? (
+          <>
+            <TextField label="Airport or programme" value={target} onChange={setTarget} placeholder="KUL, or Priority Pass at SIN" />
+            <p className="text-sm text-slate-600">Paste this into an AI chat that can search the web. It looks up each lounge and the programmes it accepts, so you don’t have to type them.</p>
+          </>
+        ) : kind === 'trips' ? (
+          <p className="text-sm text-slate-600">Paste this into any AI chat and attach your e-ticket. It returns your departures, including the flight home, without your name or booking reference.</p>
         ) : (
           <>
             <SelectField label="Card" value={cardId} onChange={(v) => setCardId(v || '')} options={doc.cards.map((c) => [c.card_id, cardLabel(c)])} placeholder="Choose a card" />
-            <p className="text-sm text-slate-600">Paste this into any AI chat and attach the statement or a screenshot of your banking app.</p>
+            <p className="text-sm text-slate-600">Adds this card’s transactions in bulk, so the app can count them towards conditions like RM500 spend. Paste this into any AI chat and attach the statement. The newest spending may not be on a statement yet, so a banking app screenshot works too.</p>
           </>
         )}
         <button className="btn-primary" onClick={copy}>
@@ -322,6 +437,8 @@ export default function ImportScreen({ arg }) {
 
       {preview?.kind === 'rules' && <RulesPreview preview={preview} setPreview={setPreview} onDone={done} />}
       {preview?.kind === 'spends' && <SpendPreview preview={preview} setPreview={setPreview} onDone={done} />}
+      {preview?.kind === 'lounges' && <LoungesPreview preview={preview} setPreview={setPreview} onDone={done} />}
+      {preview?.kind === 'trips' && <TripsPreview preview={preview} setPreview={setPreview} onDone={done} />}
     </div>
   )
 }

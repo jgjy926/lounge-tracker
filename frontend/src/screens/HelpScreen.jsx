@@ -47,10 +47,19 @@ export default function HelpScreen() {
           <li>Paste the JSON answer back and tap Read it.</li>
           <li>Check the amber items and quotes, and pick the right card.</li>
           <li>Tap Register. The card and rule are saved.</li>
-          <li>Library › Lounges: add each lounge. Its programme must match the rule’s, such as Plaza Premium.</li>
+          <li>Import › Lounges: name an airport or programme, and paste the AI’s answer back. Check each lounge, then mark it as checked.</li>
           <li>Spend: add recent spend, or import a statement, if the card has a spend condition.</li>
-          <li>Check: try a date and lounge to confirm the answer looks right.</li>
+          <li>Find: search a lounge and confirm the answers look right.</li>
         </ol>
+      </Section>
+
+      <Section title="How lounges and cards link">
+        <p className="text-sm text-slate-800">You don’t link them by hand. A card’s rule names a programme, such as Plaza Premium, and a lounge lists the programmes it accepts. When they match, that card’s rule applies to that lounge.</p>
+      </Section>
+
+      <Section title="Planning a trip">
+        <p className="text-sm text-slate-800">Add a flight in Trips, or import an e-ticket. You’ll see the best card, how much is left to spend, when counting starts, and the deadlines. Visits on earlier trips count against your quota, so two trips can’t rely on your last visit.</p>
+        <p className="text-sm text-slate-800">The Android app reminds you when the window opens, a week before the deadline and the day before. In a browser, add the reminders to your calendar from the Trips tab.</p>
       </Section>
 
       <Section title="When the bank changes its terms">

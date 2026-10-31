@@ -2,9 +2,10 @@
 import { useState } from 'react'
 import { AreaField, NumberField, SelectField, Sheet, TextField } from './ui'
 import { useStore } from '../store/useStore'
-import { SPEND_TYPES, cardLabel, emptyCard, emptyLounge, emptySpend, emptyVisit, loungeLabel } from '../lib/schema'
+import { SPEND_TYPES, cardLabel, emptyCard, emptyLounge, emptySpend, emptyTrip, emptyVisit, loungeLabel } from '../lib/schema'
 import { evaluateCard } from '../lib/engine'
 import { isIsoDate, todayIso } from '../lib/dates'
+import { askForReminders, remindersSupported, syncReminders } from '../lib/reminders'
 
 const HOLDERS = [
   ['principal', 'Principal'],
@@ -14,7 +15,7 @@ const HOLDERS = [
 const cardOptions = (doc) =>
   doc.cards.filter((c) => c.status !== 'closed').map((c) => [c.card_id, cardLabel(c)])
 
-export function VisitForm({ initial, onClose }) {
+export function VisitForm({ initial, onClose, onSaved }) {
   const doc = useStore((s) => s.doc)
   const upsert = useStore((s) => s.upsert)
   const remove = useStore((s) => s.remove)
@@ -30,6 +31,7 @@ export function VisitForm({ initial, onClose }) {
     // Tie the visit to the rule group it uses, so quota follows new T&C versions.
     const r = evaluateCard(doc, v.card_id, { date: v.date, today: todayIso(), lounge, holder: v.holder, flight: v.flight, guests: v.guests, excludeVisitId: v.visit_id })
     upsert('visits', { ...v, rule_group: r.status === 'not_covered' ? v.rule_group : r.rule?.group || v.rule_group })
+    onSaved?.(v)
     onClose()
   }
 
@@ -197,13 +199,85 @@ export function LoungeForm({ initial, onClose }) {
         <TextField label="Airport code" maxLength={4} value={l.airport_code} onChange={(airport_code) => set({ airport_code })} placeholder="KUL" />
         <TextField label="Country" value={l.country} onChange={(country) => set({ country })} placeholder="Malaysia" />
       </div>
-      <TextField label="Airport name" value={l.airport_name} onChange={(airport_name) => set({ airport_name })} placeholder="Kuala Lumpur International Airport" />
+      <div className="grid grid-cols-2 gap-3">
+        <TextField label="Airport name" value={l.airport_name} onChange={(airport_name) => set({ airport_name })} placeholder="KLIA" />
+        <TextField label="City" value={l.city} onChange={(city) => set({ city })} placeholder="Kuala Lumpur" />
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <TextField label="Terminal" value={l.terminal} onChange={(terminal) => set({ terminal })} placeholder="T1" />
         <SelectField label="Zone" value={l.zone} onChange={(zone) => set({ zone: zone || '' })} options={[['airside', 'Airside'], ['landside', 'Landside']]} placeholder="Not sure" />
       </div>
       <TextField label="Opening hours" value={l.hours} onChange={(hours) => set({ hours })} />
       <AreaField label="Notes" rows={2} value={l.notes} onChange={(notes) => set({ notes })} />
+      {l.source_url && (
+        <p className="text-sm">
+          <a className="font-medium text-night-700 underline" href={l.source_url} target="_blank" rel="noopener noreferrer">Open the source page</a>
+        </p>
+      )}
+      <SelectField
+        label="Confirmed?"
+        hint="An unconfirmed lounge came from an AI, so its programmes may be wrong."
+        value={l.verified === false ? 'no' : 'yes'}
+        onChange={(v) => set({ verified: v !== 'no' })}
+        options={[['yes', 'Yes, I’ve checked it'], ['no', 'Not yet']]}
+      />
+    </Sheet>
+  )
+}
+
+export function TripForm({ initial, onClose }) {
+  const doc = useStore((st) => st.doc)
+  const upsert = useStore((st) => st.upsert)
+  const remove = useStore((st) => st.remove)
+  const [t, setT] = useState(() => ({ ...emptyTrip(), ...initial }))
+  const isEdit = doc.trips.some((x) => x.trip_id === t.trip_id)
+  const set = (patch) => setT((x) => ({ ...x, ...patch }))
+  const code = t.airport_code.trim().toUpperCase()
+  const codes = [...new Set(doc.lounges.map((l) => l.airport_code).filter(Boolean))].sort()
+  const atAirport = doc.lounges.filter((l) => l.airport_code === code)
+  const canSave = isIsoDate(t.date) && code.length >= 3
+
+  async function save() {
+    const first = !doc.trips.length
+    upsert('trips', { ...t, name: t.name.trim(), airport_code: code, flight_number: t.flight_number.trim().toUpperCase() })
+    onClose()
+    if (first && remindersSupported() && (await askForReminders())) syncReminders(useStore.getState().doc)
+  }
+
+  return (
+    <Sheet
+      title={isEdit ? 'Edit trip' : 'Add a flight'}
+      onClose={onClose}
+      footer={
+        <>
+          {isEdit && (
+            <button className="btn-danger mr-auto" onClick={() => { if (window.confirm('Delete this trip? Its reminders go too.')) { remove('trips', t.trip_id); onClose() } }}>
+              Delete
+            </button>
+          )}
+          <button className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" disabled={!canSave} onClick={save}>Save trip</button>
+        </>
+      }
+    >
+      <TextField label="Trip name" value={t.name} onChange={(name) => set({ name })} placeholder="Tokyo" hint="A return flight is its own trip, since it leaves another airport." />
+      <div className="grid grid-cols-2 gap-3">
+        <TextField label="Departure date" type="date" value={t.date} onChange={(date) => set({ date })} />
+        <TextField label="Departing from" list="trip-airports" maxLength={4} value={t.airport_code} onChange={(airport_code) => set({ airport_code, lounge_id: '' })} placeholder="KUL" />
+        <datalist id="trip-airports">
+          {codes.map((c) => <option key={c} value={c} />)}
+        </datalist>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <SelectField label="Flight" value={t.flight} onChange={(flight) => set({ flight: flight || 'unknown' })} options={[['unknown', 'Not sure'], ['international', 'International'], ['domestic', 'Domestic']]} hint="Some cards cover international flights only." />
+        <TextField label="Flight number (optional)" value={t.flight_number} onChange={(flight_number) => set({ flight_number })} placeholder="MH88" />
+      </div>
+      <SelectField label="Lounge" value={t.lounge_id} onChange={(lounge_id) => set({ lounge_id: lounge_id || '' })} options={atAirport.map((l) => [l.lounge_id, loungeLabel(l)])} placeholder={code ? `Any lounge at ${code}` : 'Any lounge at the airport'} />
+      <div className="grid grid-cols-2 gap-3">
+        <SelectField label="Card" value={t.card_id} onChange={(card_id) => set({ card_id: card_id || '' })} options={cardOptions(doc)} placeholder="Best card" />
+        <SelectField label="Cardholder" value={t.holder} onChange={(holder) => set({ holder: holder || 'principal' })} options={HOLDERS} />
+      </div>
+      <AreaField label="Note" rows={2} value={t.note} onChange={(note) => set({ note })} />
     </Sheet>
   )
 }
