@@ -113,29 +113,33 @@ export function SpendForm({ initial, onClose }) {
 }
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
-const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 const pad2 = (n) => String(n).padStart(2, '0')
 
-// Month and day pickers, so there's no date format to get wrong. Both or neither.
+// Month and year pickers, so there's no date format to get wrong. Both or neither.
+// A card saved earlier as 'MM-DD' opens with its month and no year, and stays as it
+// was unless changed.
 function AnniversaryField({ value, onChange }) {
-  const [month, setMonth] = useState(() => (/^\d{2}-\d{2}$/.test(value || '') ? value.slice(0, 2) : ''))
-  const [day, setDay] = useState(() => (/^\d{2}-\d{2}$/.test(value || '') ? value.slice(3, 5) : ''))
-  const days = month ? DAYS_IN_MONTH[Number(month) - 1] : 31
+  const saved = String(value || '')
+  const [month, setMonth] = useState(() => (/^\d{4}-\d{2}$/.test(saved) ? saved.slice(5) : /^\d{2}-\d{2}$/.test(saved) ? saved.slice(0, 2) : ''))
+  const [year, setYear] = useState(() => (/^\d{4}-\d{2}$/.test(saved) ? saved.slice(0, 4) : ''))
+  const thisYear = Number(todayIso().slice(0, 4))
+  const years = Array.from({ length: 41 }, (_, i) => String(thisYear - i))
 
-  function update(m, d) {
-    const fitted = d && m && Number(d) > DAYS_IN_MONTH[Number(m) - 1] ? '' : d
+  function update(m, y) {
     setMonth(m)
-    setDay(fitted)
-    onChange(m && fitted ? `${m}-${fitted}` : '')
+    setYear(y)
+    onChange(m && y ? `${y}-${m}` : '')
   }
 
   return (
     <div>
       <div className="grid grid-cols-2 gap-3">
-        <SelectField label="Anniversary month (optional)" value={month} onChange={(m) => update(m || '', m ? day : '')} options={MONTH_NAMES.map((name, i) => [pad2(i + 1), name])} placeholder="Not set" />
-        <SelectField label="Anniversary day" value={day} onChange={(d) => update(month, d || '')} options={Array.from({ length: days }, (_, i) => [pad2(i + 1), String(i + 1)])} placeholder="Not set" />
+        <SelectField label="Anniversary month (optional)" value={month} onChange={(m) => update(m || '', year)} options={MONTH_NAMES.map((name, i) => [pad2(i + 1), name])} placeholder="Not set" />
+        <SelectField label="Anniversary year" value={year} onChange={(y) => update(month, y || '')} options={years.map((y) => [y, y])} placeholder="Not set" />
       </div>
-      <p className="mt-1 text-xs text-slate-500">{month && !day ? 'Choose a day too, or set the month back to Not set.' : 'Needed only if visits reset on your card’s anniversary.'}</p>
+      <p className="mt-1 text-xs text-slate-500">
+        {Boolean(month) !== Boolean(year) ? 'Choose both a month and a year, or set both back to Not set.' : 'When you got the card, not its expiry date. Needed only if visits reset on your card’s anniversary.'}
+      </p>
     </div>
   )
 }

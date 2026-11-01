@@ -34,7 +34,7 @@ export default function HelpScreen() {
         <ul className="space-y-1.5">
           <Item>The bank and exact card name, as printed on the T&C</Item>
           <Item>The bank’s current lounge T&C, as a PDF or text</Item>
-          <Item>Your card anniversary month and day, only if visits reset by card year</Item>
+          <Item>Your card anniversary month and year, only if visits reset by card year</Item>
           <Item>Last 4 digits, optional. Never enter the full number</Item>
           <Item>The bank’s lounge list, if the T&C doesn’t name its lounges</Item>
         </ul>

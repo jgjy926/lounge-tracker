@@ -78,7 +78,7 @@ export const emptyCard = () => ({
   bank: '',
   name: '',
   last4: '',
-  anniversary: '', // 'MM-DD', only needed for card-year quotas
+  anniversary: '', // 'YYYY-MM', only needed for card-year quotas
   status: 'active',
   notes: '',
 })

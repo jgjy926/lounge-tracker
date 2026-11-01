@@ -43,6 +43,14 @@ export function calendarYear(iso) {
   return { start: `${y}-01-01`, end: `${y}-12-31` }
 }
 
+// A card's anniversary is saved as 'YYYY-MM', counted from the 1st of that month.
+// Cards saved earlier may hold 'MM-DD'. Returns 'MM-DD', or null if not set.
+export function anniversaryStart(value) {
+  const s = String(value || '')
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(s)) return `${s.slice(5)}-01`
+  return /^\d{2}-\d{2}$/.test(s) ? s : null
+}
+
 // The 12 months containing `iso`, starting on the card's anniversary ('MM-DD').
 export function cardYear(iso, anniversary) {
   const y = Number(iso.slice(0, 4))

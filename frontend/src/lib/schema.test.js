@@ -1,10 +1,45 @@
 import { describe, expect, test } from 'vitest'
+import { evaluateRule, quotaPeriod } from './engine'
+import { anniversaryStart } from './dates'
 import { defaultDocument, normalizeRule, withoutCard } from './schema'
 
 const rule = (cardId, over = {}) => normalizeRule({ rule_id: `r_${cardId}`, card_id: cardId, network: 'Plaza Premium', ...over })
 const lounge = (id, over = {}) => ({ lounge_id: id, name: id, networks: [], ...over })
 const docWith = (over = {}) => ({ ...defaultDocument(), cards: [{ card_id: 'c1' }, { card_id: 'c2' }], ...over })
 const listed = (cardId, ids) => rule(cardId, { lounge_scope: 'specific', lounge_ids: ids })
+
+describe('card anniversary as month and year', () => {
+  const cardYearRule = rule('c1', { quota: { principal: 2, supplementary: 0, unlimited: false, period: 'card_year', per_day_limit: null }, condition: { type: 'none' }, last_verified: '2026-11-01' })
+  const withCard = (anniversary) => ({ ...docWith({ rules: [cardYearRule] }), cards: [{ card_id: 'c1', bank: 'AEON', name: 'Gold', status: 'active', anniversary }] })
+
+  test('counts the card year from the 1st of that month', () => {
+    expect(quotaPeriod(cardYearRule, { anniversary: '2019-06' }, '2026-11-01')).toEqual({ start: '2026-06-01', end: '2027-05-31' })
+    expect(quotaPeriod(cardYearRule, { anniversary: '2019-06' }, '2026-05-31')).toEqual({ start: '2025-06-01', end: '2026-05-31' })
+  })
+
+  test('the year makes no difference to the reset', () => {
+    expect(quotaPeriod(cardYearRule, { anniversary: '2024-06' }, '2026-11-01')).toEqual(quotaPeriod(cardYearRule, { anniversary: '2019-06' }, '2026-11-01'))
+  })
+
+  test('a card saved earlier as month and day still works', () => {
+    expect(anniversaryStart('06-15')).toBe('06-15')
+    expect(quotaPeriod(cardYearRule, { anniversary: '06-15' }, '2026-11-01').start).toBe('2026-06-15')
+  })
+
+  test('nothing usable means the answer is unclear', () => {
+    expect(anniversaryStart('')).toBeNull()
+    expect(anniversaryStart('2019-13')).toBeNull()
+    const r = evaluateRule(withCard(''), cardYearRule, { date: '2026-11-01', today: '2026-11-01' })
+    expect(r.status).toBe('unclear')
+    expect(r.headline).toMatch(/anniversary month is missing/)
+  })
+
+  test('only the anniversary month warns that the exact date may differ', () => {
+    const at = (date) => evaluateRule(withCard('2019-06'), cardYearRule, { date, today: '2026-06-01' }).reminders.join(' ')
+    expect(at('2026-06-20')).toMatch(/reset this month/)
+    expect(at('2026-07-01')).not.toMatch(/reset this month/)
+  })
+})
 
 describe('removing a card', () => {
   test('takes its rules, visits and spend, and leaves other cards alone', () => {

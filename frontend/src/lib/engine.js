@@ -7,6 +7,7 @@
 // does not settle.
 import {
   addDays,
+  anniversaryStart,
   calendarMonth,
   calendarQuarter,
   calendarYear,
@@ -164,7 +165,7 @@ export function quotaPeriod(rule, card, date) {
     case 'calendar_quarter':
       return calendarQuarter(date)
     case 'card_year':
-      return /^\d{2}-\d{2}$/.test(card?.anniversary || '') ? cardYear(date, card.anniversary) : null
+      return anniversaryStart(card?.anniversary) ? cardYear(date, anniversaryStart(card.anniversary)) : null
     case 'lifetime':
       return { start: '0000-01-01', end: '9999-12-31' }
     default:
@@ -254,8 +255,8 @@ export function evaluateRule(doc, rule, ctx) {
   // Quota
   const quota = assessQuota(doc, rule, card, { date, holder, guests, excludeVisitId })
   if (!quota.known) {
-    const why = rule.quota.period === 'card_year' && !card?.anniversary
-      ? 'The card’s anniversary date is missing.'
+    const why = rule.quota.period === 'card_year' && !anniversaryStart(card?.anniversary)
+      ? 'The card’s anniversary month is missing.'
       : 'The T&C entry does not state the number of visits or when it resets.'
     unclear = unclear || why
     checks.push(check('unknown', 'Visits left', why, ev.quota))
@@ -344,6 +345,10 @@ export function evaluateRule(doc, rule, ctx) {
   if (rule.confidence === 'low') checks.push(check('warn', 'Import confidence', 'Marked low when imported'))
   if (lounge?.verified === false) checks.push(check('warn', 'Lounge details', 'Found by AI and not confirmed yet. Check it accepts this programme'))
 
+  // Only the month is known, so a visit in that month could fall either side of the reset.
+  if (rule.quota.period === 'card_year' && /^\d{4}-\d{2}$/.test(card?.anniversary || '') && date.slice(5, 7) === card.anniversary.slice(5)) {
+    base.reminders.push('Your visits reset this month. The app counts from the 1st, so check the exact date with the bank if your visits are running out.')
+  }
   if (rule.entry_requirements) base.reminders.push(`At entry: ${rule.entry_requirements}`)
   if (rule.penalty?.note && !blocked) base.reminders.push(`If conditions aren’t met: ${rule.penalty.note}`)
   if (rule.duration_hours) base.reminders.push(`Stay limit: ${rule.duration_hours} hours.`)
