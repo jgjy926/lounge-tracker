@@ -123,7 +123,8 @@ function AnniversaryField({ value, onChange }) {
   const [month, setMonth] = useState(() => (/^\d{4}-\d{2}$/.test(saved) ? saved.slice(5) : /^\d{2}-\d{2}$/.test(saved) ? saved.slice(0, 2) : ''))
   const [year, setYear] = useState(() => (/^\d{4}-\d{2}$/.test(saved) ? saved.slice(0, 4) : ''))
   const thisYear = Number(todayIso().slice(0, 4))
-  const years = Array.from({ length: 41 }, (_, i) => String(thisYear - i))
+  // The next anniversary, so the list runs forward. A year already saved stays selectable.
+  const years = [...new Set([year, ...Array.from({ length: 11 }, (_, i) => String(thisYear + i))])].filter(Boolean).sort()
 
   function update(m, y) {
     setMonth(m)
@@ -134,11 +135,11 @@ function AnniversaryField({ value, onChange }) {
   return (
     <div>
       <div className="grid grid-cols-2 gap-3">
-        <SelectField label="Anniversary month (optional)" value={month} onChange={(m) => update(m || '', year)} options={MONTH_NAMES.map((name, i) => [pad2(i + 1), name])} placeholder="Not set" />
-        <SelectField label="Anniversary year" value={year} onChange={(y) => update(month, y || '')} options={years.map((y) => [y, y])} placeholder="Not set" />
+        <SelectField label="Next anniversary month (optional)" value={month} onChange={(m) => update(m || '', year)} options={MONTH_NAMES.map((name, i) => [pad2(i + 1), name])} placeholder="Not set" />
+        <SelectField label="Next anniversary year" value={year} onChange={(y) => update(month, y || '')} options={years.map((y) => [y, y])} placeholder="Not set" />
       </div>
       <p className="mt-1 text-xs text-slate-500">
-        {Boolean(month) !== Boolean(year) ? 'Choose both a month and a year, or set both back to Not set.' : 'When you got the card, not its expiry date. Needed only if visits reset on your card’s anniversary.'}
+        {Boolean(month) !== Boolean(year) ? 'Choose both a month and a year, or set both back to Not set.' : 'Your card’s next anniversary. Needed only if visits reset on it.'}
       </p>
     </div>
   )
