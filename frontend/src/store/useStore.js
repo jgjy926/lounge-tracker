@@ -1,7 +1,7 @@
 // Single source of truth. Mutations update the in-memory doc, persist to
 // IndexedDB immediately (local-first), and schedule a cloud save.
 import { create } from 'zustand'
-import { defaultDocument, normalizeDoc, normalizeRule, ruleGroup } from '../lib/schema'
+import { defaultDocument, normalizeDoc, normalizeRule, ruleGroup, withoutCard } from '../lib/schema'
 import { loadState, loadSyncMeta, saveState, saveSyncMeta } from '../lib/storage'
 import { createSync } from '../lib/sync'
 import { cloudEnabled, fetchRemoteState, pushRemoteState } from '../lib/api'
@@ -92,18 +92,8 @@ export const useStore = create((set, get) => {
       get().upsert('rules', next)
     },
 
-    // A card takes its rules, visits and spend with it. The Library warns first.
-    removeCard: (cardId) => {
-      const { doc } = get()
-      commit({
-        ...doc,
-        cards: doc.cards.filter((c) => c.card_id !== cardId),
-        rules: doc.rules.filter((r) => r.card_id !== cardId),
-        visits: doc.visits.filter((v) => v.card_id !== cardId),
-        spends: doc.spends.filter((s) => s.card_id !== cardId),
-        trips: doc.trips.map((t) => (t.card_id === cardId ? { ...t, card_id: '' } : t)),
-      })
-    },
+    // The Library warns first.
+    removeCard: (cardId) => commit(withoutCard(get().doc, cardId)),
 
     replaceDoc: (next) => commit(next),
   }

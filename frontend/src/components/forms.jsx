@@ -112,25 +112,61 @@ export function SpendForm({ initial, onClose }) {
   )
 }
 
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+const pad2 = (n) => String(n).padStart(2, '0')
+
+// Month and day pickers, so there's no date format to get wrong. Both or neither.
+function AnniversaryField({ value, onChange }) {
+  const [month, setMonth] = useState(() => (/^\d{2}-\d{2}$/.test(value || '') ? value.slice(0, 2) : ''))
+  const [day, setDay] = useState(() => (/^\d{2}-\d{2}$/.test(value || '') ? value.slice(3, 5) : ''))
+  const days = month ? DAYS_IN_MONTH[Number(month) - 1] : 31
+
+  function update(m, d) {
+    const fitted = d && m && Number(d) > DAYS_IN_MONTH[Number(m) - 1] ? '' : d
+    setMonth(m)
+    setDay(fitted)
+    onChange(m && fitted ? `${m}-${fitted}` : '')
+  }
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-3">
+        <SelectField label="Anniversary month (optional)" value={month} onChange={(m) => update(m || '', m ? day : '')} options={MONTH_NAMES.map((name, i) => [pad2(i + 1), name])} placeholder="Not set" />
+        <SelectField label="Anniversary day" value={day} onChange={(d) => update(month, d || '')} options={Array.from({ length: days }, (_, i) => [pad2(i + 1), String(i + 1)])} placeholder="Not set" />
+      </div>
+      <p className="mt-1 text-xs text-slate-500">{month && !day ? 'Choose a day too, or set the month back to Not set.' : 'Needed only if visits reset on your card’s anniversary.'}</p>
+    </div>
+  )
+}
+
+// Shared by the card's page and its edit form, so removing always warns the same way.
+export function useRemoveCard() {
+  const doc = useStore((st) => st.doc)
+  const removeCard = useStore((st) => st.removeCard)
+  const showToast = useStore((st) => st.showToast)
+  return (card) => {
+    const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+    const rules = doc.rules.filter((r) => r.card_id === card.card_id).length
+    const visits = doc.visits.filter((v) => v.card_id === card.card_id).length
+    const spends = doc.spends.filter((s) => s.card_id === card.card_id).length
+    const ok = window.confirm(`Remove ${card.bank} ${card.name}? This also removes its ${count(rules, 'rule')}, ${count(visits, 'visit')} and ${count(spends, 'spend record')}. If you only stopped using the card, mark it Closed in Edit card instead.`)
+    if (ok) {
+      removeCard(card.card_id)
+      showToast('Card removed')
+    }
+    return ok
+  }
+}
+
 export function CardForm({ initial, onClose }) {
   const doc = useStore((st) => st.doc)
   const upsert = useStore((st) => st.upsert)
-  const removeCard = useStore((st) => st.removeCard)
+  const removeWithWarning = useRemoveCard()
   const [c, setC] = useState(() => ({ ...emptyCard(), ...initial }))
   const isEdit = doc.cards.some((x) => x.card_id === c.card_id)
   const set = (patch) => setC((x) => ({ ...x, ...patch }))
   const badLast4 = c.last4 && !/^\d{4}$/.test(c.last4)
-  const badAnniv = c.anniversary && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(c.anniversary)
-
-  function del() {
-    const rules = doc.rules.filter((r) => r.card_id === c.card_id).length
-    const visits = doc.visits.filter((v) => v.card_id === c.card_id).length
-    const spends = doc.spends.filter((s) => s.card_id === c.card_id).length
-    if (window.confirm(`Delete this card with its ${rules} rules, ${visits} visits and ${spends} spend records? If you only stopped using it, mark it closed instead.`)) {
-      removeCard(c.card_id)
-      onClose()
-    }
-  }
 
   return (
     <Sheet
@@ -138,18 +174,16 @@ export function CardForm({ initial, onClose }) {
       onClose={onClose}
       footer={
         <>
-          {isEdit && <button className="btn-danger mr-auto" onClick={del}>Delete</button>}
+          {isEdit && <button className="btn-danger mr-auto" onClick={() => { if (removeWithWarning(c)) onClose() }}>Remove card</button>}
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" disabled={!c.bank.trim() || !c.name.trim() || badLast4 || badAnniv} onClick={() => { upsert('cards', { ...c, bank: c.bank.trim(), name: c.name.trim() }); onClose() }}>Save card</button>
+          <button className="btn-primary" disabled={!c.bank.trim() || !c.name.trim() || badLast4} onClick={() => { upsert('cards', { ...c, bank: c.bank.trim(), name: c.name.trim() }); onClose() }}>Save card</button>
         </>
       }
     >
       <TextField label="Bank" value={c.bank} onChange={(bank) => set({ bank })} placeholder="AEON" />
       <TextField label="Card name" value={c.name} onChange={(name) => set({ name })} placeholder="Member Plus Gold Visa" />
-      <div className="grid grid-cols-2 gap-3">
-        <TextField label="Last 4 digits (optional)" inputMode="numeric" maxLength={4} value={c.last4} onChange={(last4) => set({ last4 })} hint={badLast4 ? 'Use exactly 4 digits.' : 'Never the full number.'} />
-        <TextField label="Card anniversary (optional)" placeholder="MM-DD" maxLength={5} value={c.anniversary} onChange={(anniversary) => set({ anniversary })} hint={badAnniv ? 'Use MM-DD, like 06-01.' : 'Needed only for card-year quotas.'} />
-      </div>
+      <TextField label="Last 4 digits (optional)" inputMode="numeric" maxLength={4} value={c.last4} onChange={(last4) => set({ last4 })} hint={badLast4 ? 'Use exactly 4 digits.' : 'Never the full number.'} />
+      <AnniversaryField value={c.anniversary} onChange={(anniversary) => set({ anniversary })} />
       <SelectField label="Status" value={c.status} onChange={(status) => set({ status: status || 'active' })} options={[['active', 'Active'], ['closed', 'Closed']]} />
       <AreaField label="Notes" rows={2} value={c.notes} onChange={(notes) => set({ notes })} />
     </Sheet>

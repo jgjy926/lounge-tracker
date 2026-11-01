@@ -211,6 +211,31 @@ export function normalizeRule(r) {
   return rule
 }
 
+// A card takes its rules, visits and spend with it. Lounges it alone listed go too,
+// so a card added in error leaves nothing behind in search. A lounge stays if another
+// card lists it or its programme, or a trip or remaining visit points at it.
+export function withoutCard(doc, cardId) {
+  const gone = doc.rules.filter((r) => r.card_id === cardId)
+  const rules = doc.rules.filter((r) => r.card_id !== cardId)
+  const visits = doc.visits.filter((v) => v.card_id !== cardId)
+  const trips = doc.trips.map((t) => (t.card_id === cardId ? { ...t, card_id: '' } : t))
+  const candidates = new Set(gone.flatMap((r) => r.lounge_ids || []))
+  const inUse = (l) =>
+    rules.some((r) => (r.lounge_ids || []).includes(l.lounge_id) || (r.lounge_scope !== 'specific' && (l.networks || []).some((n) => sameProgramme(n, r.network)))) ||
+    visits.some((v) => v.lounge_id === l.lounge_id) ||
+    trips.some((t) => t.lounge_id === l.lounge_id)
+  return {
+    ...doc,
+    cards: doc.cards.filter((c) => c.card_id !== cardId),
+    rules,
+    visits,
+    spends: doc.spends.filter((s) => s.card_id !== cardId),
+    trips,
+    lounges: doc.lounges.filter((l) => !candidates.has(l.lounge_id) || inUse(l)),
+    documents: doc.documents.map((d) => ({ ...d, card_ids: (d.card_ids || []).filter((id) => id !== cardId) })),
+  }
+}
+
 export const cardLabel = (card) =>
   card ? `${card.bank} ${card.name}`.trim() + (card.last4 ? ` ··${card.last4}` : '') : 'Unknown card'
 

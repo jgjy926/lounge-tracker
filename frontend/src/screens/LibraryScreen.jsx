@@ -1,7 +1,7 @@
 // Maintenance: cards, lounges, rules with their version history, and saved T&Cs.
 import { useState } from 'react'
 import { AreaField, Empty, Icon, PageTitle, Segmented, SelectField, Sheet, TextField, go } from '../components/ui'
-import { CardForm, LoungeForm } from '../components/forms'
+import { CardForm, LoungeForm, useRemoveCard } from '../components/forms'
 import RuleForm from '../components/RuleForm'
 import { useStore } from '../store/useStore'
 import { STALE_AFTER_DAYS, liveRules, loungesForCard, loungesForRule, money } from '../lib/engine'
@@ -20,6 +20,7 @@ const label = (pairs, v) => pairs.find(([k]) => k === v)?.[1] || NOT_STATED
 
 function CardDetail({ card, onEdit, onClose, onOpenDoc }) {
   const doc = useStore((s) => s.doc)
+  const removeWithWarning = useRemoveCard()
   const today = todayIso()
   const rules = liveRules(doc, card.card_id, today)
   const docs = doc.documents.filter((d) => (d.card_ids || []).includes(card.card_id))
@@ -30,8 +31,9 @@ function CardDetail({ card, onEdit, onClose, onOpenDoc }) {
       onClose={onClose}
       footer={
         <>
-          <button className="btn-ghost" onClick={onEdit}><Icon name="edit" size={16} /> Edit card</button>
-          <button className="btn-primary" onClick={() => go(`import/lounges/${card.card_id}`)}><Icon name="import" size={16} /> Import lounge list</button>
+          <button className="btn-danger mr-auto" onClick={() => { if (removeWithWarning(card)) onClose() }}><Icon name="trash" size={16} /> Remove</button>
+          <button className="btn-ghost" onClick={onEdit}><Icon name="edit" size={16} /> Edit</button>
+          <button className="btn-primary" onClick={() => go(`import/lounges/${card.card_id}`)}><Icon name="import" size={16} /> Lounge list</button>
         </>
       }
     >
